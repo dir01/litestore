@@ -26,9 +26,9 @@ type EntityStore[T any] struct {
 	updateUpsertStmt *sql.Stmt
 }
 
-// NewEntityStorage creates a new EntityStore instance for a given table name.
+// NewEntityStore creates a new EntityStore instance for a given table name.
 // The table name must be a valid SQL identifier.
-func NewEntityStorage[T any](db *sql.DB, tableName string) (*EntityStore[T], error) {
+func NewEntityStore[T any](db *sql.DB, tableName string) (*EntityStore[T], error) {
 	if !validTableName.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}

@@ -26,14 +26,12 @@ func NewRecordsStore[T any](db *sql.DB, tableName string, recordType string) (*R
 	if !validTableName.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
-	if !validTableName.MatchString(recordType) {
-		return nil, fmt.Errorf("invalid record type: %s", recordType)
-	}
 	store := &RecordsStore[T]{
 		db:         db,
 		tableName:  tableName,
 		recordType: recordType,
 	}
+
 	ctx := context.Background()
 	if err := store.init(ctx); err != nil {
 		return nil, err

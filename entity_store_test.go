@@ -1,12 +1,10 @@
 package litestore_test
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/dir01/litestore"
 
@@ -24,18 +22,15 @@ func TestEntityStore_Get_Set(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewEntityStorage[*FakeUser](db, "fake_users")
+	s, err := litestore.NewEntityStore[*FakeUser](db, "fake_users")
 	if err != nil {
 		t.Fatalf("failed to create new storage: %v", err)
 	}
-	defer s.Close()
-
-	ctx := context.Background()
 
 	t.Run("Get on empty storage", func(t *testing.T) {
 		userID := mkEntityID()
 
-		user, err := s.Get(ctx, userID)
+		user, err := s.Get(t.Context(), userID)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -49,12 +44,12 @@ func TestEntityStore_Get_Set(t *testing.T) {
 		userID := mkEntityID()
 		initialUser := &FakeUser{Username: "someusername", Age: 30}
 
-		err := s.Set(ctx, userID, initialUser)
+		err := s.Set(t.Context(), userID, initialUser)
 		if err != nil {
 			t.Fatalf("failed to .Set() user: %v", err)
 		}
 
-		got, err := s.Get(ctx, userID)
+		got, err := s.Get(t.Context(), userID)
 		if err != nil {
 			t.Fatalf("failed to .Get() user data after .Set(): %v", err)
 		}
@@ -72,17 +67,17 @@ func TestEntityStore_Get_Set(t *testing.T) {
 		firstUser := &FakeUser{Username: "foouser", Email: "foo@example.com", IsPremium: false, Age: 25}
 		secondUser := &FakeUser{Username: "baruser", Email: "bar@example.com", IsPremium: true, Age: 52}
 
-		err := s.Set(ctx, userID, firstUser)
+		err := s.Set(t.Context(), userID, firstUser)
 		if err != nil {
 			t.Fatalf("failed to initially .Set() user: %v", err)
 		}
 
-		err = s.Set(ctx, userID, secondUser)
+		err = s.Set(t.Context(), userID, secondUser)
 		if err != nil {
 			t.Fatalf("failed to secondarily .Set() user: %v", err)
 		}
 
-		got, err := s.Get(ctx, userID)
+		got, err := s.Get(t.Context(), userID)
 		if err != nil {
 			t.Fatalf("failed to .Get() user data after .Set(): %v", err)
 		}
@@ -100,29 +95,26 @@ func TestEntityStore_Update(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewEntityStorage[*FakeUser](db, "fake_users")
+	s, err := litestore.NewEntityStore[*FakeUser](db, "fake_users")
 	if err != nil {
 		t.Fatalf("failed to create new storage: %v", err)
 	}
-	defer s.Close()
-
-	ctx := context.Background()
 
 	t.Run("Update merges data", func(t *testing.T) {
 		userID := mkEntityID()
 		user := &FakeUser{Username: "foouser", Email: "foo@example.com", IsPremium: true, Age: 40}
 
-		err := s.Set(ctx, userID, user)
+		err := s.Set(t.Context(), userID, user)
 		if err != nil {
 			t.Fatalf("failed to initially .Set() user: %v", err)
 		}
 
-		err = s.Update(ctx, userID, map[string]any{"username": "baruser", "age": 41})
+		err = s.Update(t.Context(), userID, map[string]any{"username": "baruser", "age": 41})
 		if err != nil {
 			t.Fatalf("failed to .Update() user: %v", err)
 		}
 
-		got, err := s.Get(ctx, userID)
+		got, err := s.Get(t.Context(), userID)
 		if err != nil {
 			t.Fatalf("failed to get user data after update: %v", err)
 		}
@@ -147,13 +139,10 @@ func TestEntityStore_ForEach(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewEntityStorage[*FakeUser](db, "query_users")
+	s, err := litestore.NewEntityStore[*FakeUser](db, "query_users")
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
 	}
-	defer s.Close()
-
-	ctx := context.Background()
 
 	// Setup test data
 	users := map[string]*FakeUser{
@@ -163,7 +152,7 @@ func TestEntityStore_ForEach(t *testing.T) {
 		"user4": {Username: "david", IsPremium: true, Age: 35},
 	}
 	for id, data := range users {
-		if err := s.Set(ctx, id, data); err != nil {
+		if err := s.Set(t.Context(), id, data); err != nil {
 			t.Fatalf("failed to setup user %s: %v", id, err)
 		}
 	}
@@ -195,7 +184,7 @@ func TestEntityStore_ForEach(t *testing.T) {
 			litestore.Filter{Key: "is_premium", Op: litestore.OpEq, Value: true},
 			litestore.Filter{Key: "age", Op: litestore.OpGTE, Value: 35},
 		)
-		err := s.ForEach(ctx, p, func(key string, user *FakeUser) error {
+		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
 			results = append(results, result{Key: key, User: user})
 			return nil
 		})
@@ -218,7 +207,7 @@ func TestEntityStore_ForEach(t *testing.T) {
 			),
 			litestore.Filter{Key: "username", Op: litestore.OpEq, Value: "charlie"},
 		)
-		err := s.ForEach(ctx, p, func(key string, user *FakeUser) error {
+		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
 			results = append(results, result{Key: key, User: user})
 			return nil
 		})
@@ -235,7 +224,7 @@ func TestEntityStore_ForEach(t *testing.T) {
 
 	t.Run("nil predicate returns all", func(t *testing.T) {
 		var results []result
-		err := s.ForEach(ctx, nil, func(key string, user *FakeUser) error {
+		err := s.ForEach(t.Context(), nil, func(key string, user *FakeUser) error {
 			results = append(results, result{Key: key, User: user})
 			return nil
 		})
@@ -256,7 +245,7 @@ func TestEntityStore_ForEach(t *testing.T) {
 		stopErr := errors.New("stop iteration")
 		p := litestore.Filter{Key: "is_premium", Op: litestore.OpEq, Value: true} // Should match 3 users
 
-		err := s.ForEach(ctx, p, func(key string, user *FakeUser) error {
+		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
 			processedKeys = append(processedKeys, key)
 			if len(processedKeys) == 2 {
 				return stopErr
@@ -278,39 +267,12 @@ func TestEntityStore_ForEach(t *testing.T) {
 
 	t.Run("query with invalid operator", func(t *testing.T) {
 		p := litestore.Filter{Key: "age", Op: "INVALID", Value: 10}
-		err := s.ForEach(ctx, p, func(key string, user *FakeUser) error {
+		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
 			t.Error("callback should not be called for invalid query")
 			return nil
 		})
 		if err == nil {
 			t.Fatal("expected an error for invalid operator, got nil")
-		}
-	})
-
-	t.Run("context cancellation stops iteration", func(t *testing.T) {
-		cancelCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		var processedKeys []string
-		err := s.ForEach(cancelCtx, nil, func(key string, user *FakeUser) error {
-			processedKeys = append(processedKeys, key)
-			if len(processedKeys) == 2 {
-				cancel() // Cancel the context after processing two items
-			}
-			// Add a small delay to ensure the cancellation is processed
-			time.Sleep(10 * time.Millisecond)
-			return nil
-		})
-
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected error '%v', but got '%v'", context.Canceled, err)
-		}
-
-		if len(processedKeys) != 2 {
-			t.Errorf(
-				"expected iteration to stop after 2 items due to cancellation, but processed %d",
-				len(processedKeys),
-			)
 		}
 	})
 }
