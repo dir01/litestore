@@ -1,7 +1,6 @@
 package litestore_test
 
 import (
-	"errors"
 	"reflect"
 	"sort"
 	"testing"
@@ -26,6 +25,8 @@ func TestEntityStore_Get_Set(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new storage: %v", err)
 	}
+
+	defer s.Close()
 
 	t.Run("Get on empty storage", func(t *testing.T) {
 		userID := mkEntityID()
@@ -100,6 +101,8 @@ func TestEntityStore_Update(t *testing.T) {
 		t.Fatalf("failed to create new storage: %v", err)
 	}
 
+	defer s.Close()
+
 	t.Run("Update merges data", func(t *testing.T) {
 		userID := mkEntityID()
 		user := &FakeUser{Username: "foouser", Email: "foo@example.com", IsPremium: true, Age: 40}
@@ -135,7 +138,7 @@ func TestEntityStore_Update(t *testing.T) {
 	})
 }
 
-func TestEntityStore_ForEach(t *testing.T) {
+func TestEntityStore_Iter(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
@@ -143,6 +146,8 @@ func TestEntityStore_ForEach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
 	}
+
+	defer s.Close()
 
 	// Setup test data
 	users := map[string]*FakeUser{
@@ -184,13 +189,17 @@ func TestEntityStore_ForEach(t *testing.T) {
 			litestore.Filter{Key: "is_premium", Op: litestore.OpEq, Value: true},
 			litestore.Filter{Key: "age", Op: litestore.OpGTE, Value: 35},
 		)
-		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
-			results = append(results, result{Key: key, User: user})
-			return nil
-		})
+		seq, err := s.Iter(t.Context(), p)
 		if err != nil {
-			t.Fatalf("ForEach failed: %v", err)
+			t.Fatalf("Iter failed: %v", err)
 		}
+		for pair, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			results = append(results, result{Key: pair.Key, User: pair.Data})
+		}
+
 		expected := []result{
 			{Key: "user2", User: users["user2"]},
 			{Key: "user4", User: users["user4"]},
@@ -207,13 +216,17 @@ func TestEntityStore_ForEach(t *testing.T) {
 			),
 			litestore.Filter{Key: "username", Op: litestore.OpEq, Value: "charlie"},
 		)
-		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
-			results = append(results, result{Key: key, User: user})
-			return nil
-		})
+		seq, err := s.Iter(t.Context(), p)
 		if err != nil {
-			t.Fatalf("ForEach failed: %v", err)
+			t.Fatalf("Iter failed: %v", err)
 		}
+		for pair, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			results = append(results, result{Key: pair.Key, User: pair.Data})
+		}
+
 		// Expects alice (premium and age < 35) and charlie (username is charlie)
 		expected := []result{
 			{Key: "user1", User: users["user1"]},
@@ -224,13 +237,17 @@ func TestEntityStore_ForEach(t *testing.T) {
 
 	t.Run("nil predicate returns all", func(t *testing.T) {
 		var results []result
-		err := s.ForEach(t.Context(), nil, func(key string, user *FakeUser) error {
-			results = append(results, result{Key: key, User: user})
-			return nil
-		})
+		seq, err := s.Iter(t.Context(), nil)
 		if err != nil {
-			t.Fatalf("ForEach failed: %v", err)
+			t.Fatalf("Iter failed: %v", err)
 		}
+		for pair, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			results = append(results, result{Key: pair.Key, User: pair.Data})
+		}
+
 		expected := []result{
 			{Key: "user1", User: users["user1"]},
 			{Key: "user2", User: users["user2"]},
@@ -240,21 +257,23 @@ func TestEntityStore_ForEach(t *testing.T) {
 		compareResults(t, results, expected)
 	})
 
-	t.Run("callback error stops iteration", func(t *testing.T) {
+	t.Run("break stops iteration", func(t *testing.T) {
 		var processedKeys []string
-		stopErr := errors.New("stop iteration")
 		p := litestore.Filter{Key: "is_premium", Op: litestore.OpEq, Value: true} // Should match 3 users
 
-		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
-			processedKeys = append(processedKeys, key)
-			if len(processedKeys) == 2 {
-				return stopErr
-			}
-			return nil
-		})
+		seq, err := s.Iter(t.Context(), p)
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
 
-		if !errors.Is(err, stopErr) {
-			t.Fatalf("expected error '%v', but got '%v'", stopErr, err)
+		for pair, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			processedKeys = append(processedKeys, pair.Key)
+			if len(processedKeys) == 2 {
+				break
+			}
 		}
 
 		if len(processedKeys) != 2 {
@@ -267,12 +286,12 @@ func TestEntityStore_ForEach(t *testing.T) {
 
 	t.Run("query with invalid operator", func(t *testing.T) {
 		p := litestore.Filter{Key: "age", Op: "INVALID", Value: 10}
-		err := s.ForEach(t.Context(), p, func(key string, user *FakeUser) error {
-			t.Error("callback should not be called for invalid query")
-			return nil
-		})
+		seq, err := s.Iter(t.Context(), p)
 		if err == nil {
 			t.Fatal("expected an error for invalid operator, got nil")
+		}
+		if seq != nil {
+			t.Fatal("expected a nil iterator when an error occurs")
 		}
 	})
 }

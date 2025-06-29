@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"log"
 	"regexp"
 	"strings"
@@ -13,6 +14,12 @@ import (
 )
 
 var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
+// Pair holds a key-data pair returned by an iterator.
+type Pair[T any] struct {
+	Key  string
+	Data T
+}
 
 // EntityStore provides a key-value store for a specific entity type, backed by a dedicated SQLite table.
 type EntityStore[T any] struct {
@@ -32,8 +39,10 @@ func NewEntityStore[T any](db *sql.DB, tableName string) (*EntityStore[T], error
 	if !validTableName.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
+
 	store := &EntityStore[T]{db: db, tableName: tableName}
 	ctx := context.Background()
+
 	if err := store.init(ctx); err != nil {
 		return nil, err
 	}
@@ -64,9 +73,14 @@ func (e *EntityStore[T]) Close() error {
 
 // Get returns a record by key. If the key is not found, it returns the zero value for T and no error.
 func (e *EntityStore[T]) Get(ctx context.Context, key string) (T, error) {
+	stmt := e.getStmt
+	if tx, ok := GetTx(ctx); ok {
+		stmt = tx.StmtContext(ctx, stmt)
+	}
+
 	var zero T
 	var jsonData []byte
-	err := e.getStmt.QueryRowContext(ctx, key).Scan(&jsonData)
+	err := stmt.QueryRowContext(ctx, key).Scan(&jsonData)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return zero, nil
@@ -84,12 +98,17 @@ func (e *EntityStore[T]) Get(ctx context.Context, key string) (T, error) {
 
 // Set completely overwrites a record. If the key exists, it's updated; otherwise, it's created.
 func (e *EntityStore[T]) Set(ctx context.Context, key string, newRecord T) error {
+	stmt := e.setStmt
+	if tx, ok := GetTx(ctx); ok {
+		stmt = tx.StmtContext(ctx, stmt)
+	}
+
 	newBytes, err := json.Marshal(newRecord)
 	if err != nil {
 		return fmt.Errorf("failed to marshal record: %w", err)
 	}
 
-	_, err = e.setStmt.ExecContext(ctx, key, newBytes)
+	_, err = stmt.ExecContext(ctx, key, newBytes)
 	if err != nil {
 		return fmt.Errorf("upserting data for key %s: %w", key, err)
 	}
@@ -103,54 +122,72 @@ func (e *EntityStore[T]) Update(ctx context.Context, key string, partial map[str
 		return nil
 	}
 
-	tx, err := e.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning transaction for key %s: %w", key, err)
-	}
-	defer func() {
-		if rErr := tx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
-			log.Printf("failed to rollback transaction for key %s: %v", key, rErr)
+	var tx *sql.Tx
+	isExternalTx := false
+
+	if externalTx, ok := GetTx(ctx); ok {
+		tx = externalTx
+		isExternalTx = true
+	} else {
+		newTx, err := e.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("beginning transaction for key %s: %w", key, err)
 		}
-	}()
+
+		tx = newTx
+
+		defer func() {
+			if rErr := newTx.Rollback(); rErr != nil && rErr != sql.ErrTxDone {
+				log.Printf("failed to rollback transaction for key %s: %v", key, rErr)
+			}
+		}()
+	}
 
 	// Use transaction-specific statements from the prepared ones.
 	// These are automatically closed when the transaction is committed or rolled back.
 	txUpdateSelectStmt := tx.StmtContext(ctx, e.updateSelectStmt)
 	txUpdateUpsertStmt := tx.StmtContext(ctx, e.updateUpsertStmt)
 
-	var jsonData []byte
-	err = txUpdateSelectStmt.QueryRowContext(ctx, key).Scan(&jsonData)
 	currentData := make(map[string]any)
+
+	var jsonData []byte
+	err := txUpdateSelectStmt.QueryRowContext(ctx, key).Scan(&jsonData)
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("querying entity data for key %s in transaction: %w", key, err)
-	}
-	if err == nil {
+	} else if err == nil {
 		if err := json.Unmarshal(jsonData, &currentData); err != nil {
 			return fmt.Errorf("unmarshaling existing data for key %s: %w", key, err)
 		}
 	}
+
 	for k, v := range partial {
 		currentData[k] = v
 	}
+
 	mergedData, err := json.Marshal(currentData)
 	if err != nil {
 		return fmt.Errorf("marshaling merged data for key %s: %w", key, err)
 	}
+
 	_, err = txUpdateUpsertStmt.ExecContext(ctx, key, string(mergedData))
 	if err != nil {
 		return fmt.Errorf("upserting data for key %s: %w", key, err)
 	}
 
+	if isExternalTx {
+		return nil
+	}
+
 	return tx.Commit()
 }
 
-// ForEach executes a query based on the given predicate and calls the callback for each result.
-// If the predicate is nil, it iterates over all entities in the store.
-func (e *EntityStore[T]) ForEach(
+// Iter returns an iterator over entities that match the given predicate.
+// If the predicate is nil, it iterates over all entities.
+// The iterator yields a Pair and an error for each item.
+func (e *EntityStore[T]) Iter(
 	ctx context.Context,
 	p Predicate,
-	callback func(key string, data T) error,
-) (err error) {
+) (iter.Seq2[Pair[T], error], error) {
 	var queryBuilder strings.Builder
 	args := []any{}
 
@@ -160,7 +197,7 @@ func (e *EntityStore[T]) ForEach(
 	if p != nil {
 		whereClause, whereArgs, buildErr := e.buildWhereClause(p)
 		if buildErr != nil {
-			return buildErr
+			return nil, buildErr
 		}
 		if whereClause != "" {
 			queryBuilder.WriteString(" WHERE ")
@@ -169,41 +206,52 @@ func (e *EntityStore[T]) ForEach(
 		}
 	}
 
-	rows, queryErr := e.db.QueryContext(ctx, queryBuilder.String(), args...)
+	var rows *sql.Rows
+	var queryErr error
+
+	if tx, ok := GetTx(ctx); ok {
+		rows, queryErr = tx.QueryContext(ctx, queryBuilder.String(), args...)
+	} else {
+		rows, queryErr = e.db.QueryContext(ctx, queryBuilder.String(), args...)
+	}
+
 	if queryErr != nil {
-		return fmt.Errorf("querying entity data with predicate: %w", queryErr)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("closing rows: %w", closeErr)
-		}
-	}()
-
-	for rows.Next() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		var key, jsonData string
-
-		if scanErr := rows.Scan(&key, &jsonData); scanErr != nil {
-			return fmt.Errorf("scanning entity data row: %w", scanErr)
-		}
-
-		var t T
-		if unmarshalErr := json.Unmarshal([]byte(jsonData), &t); unmarshalErr != nil {
-			return fmt.Errorf("unmarshaling entity data for key %q: %w", key, unmarshalErr)
-		}
-
-		if cbErr := callback(key, t); cbErr != nil {
-			return cbErr
-		}
+		return nil, fmt.Errorf("querying entity data with predicate: %w", queryErr)
 	}
 
-	if iterErr := rows.Err(); iterErr != nil {
-		return fmt.Errorf("during row iteration: %w", iterErr)
+	seq := func(yield func(Pair[T], error) bool) {
+		defer rows.Close()
+		var zero Pair[T]
+
+		for rows.Next() {
+			if err := ctx.Err(); err != nil {
+				yield(zero, err)
+				return
+			}
+			var key, jsonData string
+
+			if scanErr := rows.Scan(&key, &jsonData); scanErr != nil {
+				yield(zero, fmt.Errorf("scanning entity data row: %w", scanErr))
+				return
+			}
+
+			var t T
+			if unmarshalErr := json.Unmarshal([]byte(jsonData), &t); unmarshalErr != nil {
+				yield(zero, fmt.Errorf("unmarshaling entity data for key %q: %w", key, unmarshalErr))
+				return
+			}
+
+			if !yield(Pair[T]{Key: key, Data: t}, nil) {
+				return
+			}
+		}
+
+		if iterErr := rows.Err(); iterErr != nil {
+			yield(zero, fmt.Errorf("during row iteration: %w", iterErr))
+		}
 	}
 
-	return nil
+	return seq, nil
 }
 
 // buildWhereClause recursively walks the predicate tree to build the SQL query.

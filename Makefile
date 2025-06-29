@@ -24,6 +24,12 @@ test:
 	@echo "Running tests..."
 	go test -v -race ./...
 
+test-cover:
+	@echo "Running tests..."
+	go test -v -race -coverprofile cover.out ./...
+	go tool cover -html cover.out -o cover.html
+	open cover.html
+
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...

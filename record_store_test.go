@@ -10,10 +10,10 @@ import (
 	"github.com/dir01/litestore"
 )
 
-// Define structs at the package level to be accessible in all test functions.
-type ChatMessage struct {
+type ChatMsg struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	Sent    bool   `json:"sent"`
 }
 
 type LogEntry struct {
@@ -25,24 +25,24 @@ func TestRecordsStore(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create a typed store for ChatMessages
-	chatStore, err := litestore.NewRecordsStore[ChatMessage](db, "user_items", "chat")
+	// Create a typed store for ChatMsgs
+	chatStore, err := litestore.NewRecordStore[ChatMsg](db, "user_items", "chat")
 	if err != nil {
 		t.Fatalf("failed to create chat storage: %v", err)
 	}
 	defer chatStore.Close()
 
 	// Create a typed store for LogEntries, writing to the same table
-	logStore, err := litestore.NewRecordsStore[LogEntry](db, "user_items", "log")
+	logStore, err := litestore.NewRecordStore[LogEntry](db, "user_items", "log")
 	if err != nil {
 		t.Fatalf("failed to create log storage: %v", err)
 	}
 	defer logStore.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	userID := mkEntityID()
 
-	messages := []ChatMessage{
+	messages := []ChatMsg{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there!"},
 		{Role: "user", Content: "How are you?"},
@@ -71,7 +71,7 @@ func TestRecordsStore(t *testing.T) {
 		}
 
 		// Items should be returned in reverse order of insertion
-		expected := []ChatMessage{messages[2], messages[1], messages[0]}
+		expected := []ChatMsg{messages[2], messages[1], messages[0]}
 		if !reflect.DeepEqual(retrieved, expected) {
 			t.Errorf("retrieved messages do not match expected order.\ngot:  %v\nwant: %v", retrieved, expected)
 		}
@@ -88,7 +88,7 @@ func TestRecordsStore(t *testing.T) {
 		}
 
 		// Should be the last two inserted messages, in reverse order
-		expected := []ChatMessage{messages[2], messages[1]}
+		expected := []ChatMsg{messages[2], messages[1]}
 		if !reflect.DeepEqual(retrieved, expected) {
 			t.Errorf("retrieved messages do not match expected order.\ngot:  %v\nwant: %v", retrieved, expected)
 		}
@@ -124,7 +124,7 @@ func TestRecordsStore(t *testing.T) {
 	t.Run("context cancellation stops iteration", func(t *testing.T) {
 		// Add many more messages to ensure the loop is slow enough to be interrupted.
 		for i := 0; i < 500; i++ {
-			err := chatStore.Add(ctx, userID, ChatMessage{Role: "user", Content: "spam"})
+			err := chatStore.Add(ctx, userID, ChatMsg{Role: "user", Content: "spam"})
 			if err != nil {
 				t.Fatalf("failed to add spam message: %v", err)
 			}
