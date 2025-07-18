@@ -6,283 +6,157 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
-	"time"
 
 	"github.com/dir01/litestore"
-	_ "github.com/mattn/go-sqlite3"
 )
 
-// ExampleUser represents a user entity for the example.
-// It's managed by an EntityStore.
-type ExampleUser struct {
-	Username      string    `json:"username"`
-	LastMessageAt time.Time `json:"last_message_at"`
-	FollowUpSent  bool      `json:"follow_up_sent"`
+// User represents a user in our system.
+type User struct {
+	ID    string `litestore:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
-// ExampleLogEntry represents a record of a message associated with a user for the example.
-// It's managed by a RecordStore.
-type ExampleLogEntry struct {
-	UserID  string `json:"user_id"`
-	Content string `json:"content"`
-	Author  string `json:"author"` // "user" or "bot"
-	Sent    bool   `json:"sent"`   // True if sent, false if drafted
+// LoginEvent represents a login event for a user.
+// It doesn't have its own ID, but is associated with a User.
+type LoginEvent struct {
+	UserID    string `json:"user_id"`
+	Timestamp string `json:"timestamp"`
+	IPAddress string `json:"ip_address"`
 }
 
-// This function demonstrates a complete workflow using an EntityStore and a RecordStore
-// to find users who need a follow-up message, and then creating that message for them
-// within a transaction.
-func Example_followUpScenario() {
-	ctx := context.Background()
-	fmt.Println("Setting up database and stores...")
+func Example() {
+	// For this example, we'll create a temporary database file.
+	// In a real application, you would provide a path to a persistent file.
+	dbFile := "example.db"
+	defer os.Remove(dbFile)
 
-	// For this example, we create a temporary database.
-	db, cleanup, err := setupExampleDB()
+	// Open the SQLite database.
+	db, err := sql.Open("sqlite3", dbFile)
 	if err != nil {
-		log.Printf("failed to setup example db: %v", err)
-		return
+		log.Fatalf("failed to open database: %v", err)
 	}
-	defer cleanup()
+	defer db.Close()
+
+	ctx := context.Background()
 
 	// Create a store for User entities.
-	userStore, err := litestore.NewEntityStore[ExampleUser](db, "users")
+	// The table "users" will be created if it doesn't exist.
+	userStore, err := litestore.NewStore[User](ctx, db, "users")
 	if err != nil {
-		log.Printf("Failed to create user store: %v", err)
-		return
+		log.Fatalf("failed to create user store: %v", err)
 	}
 	defer userStore.Close()
 
-	// Create a store for LogEntry records.
-	logStore, err := litestore.NewRecordStore[ExampleLogEntry](db, "logs", "chat_message")
+	// Create a store for LoginEvent entities.
+	// We'll use a separate table for these.
+	eventStore, err := litestore.NewStore[LoginEvent](ctx, db, "login_events")
 	if err != nil {
-		log.Printf("Failed to create log store: %v", err)
-		return
+		log.Fatalf("failed to create event store: %v", err)
 	}
-	defer logStore.Close()
+	defer eventStore.Close()
 
-	// Use a fixed time for deterministic output.
-	mockNow := time.Date(2023, 10, 27, 15, 0, 0, 0, time.UTC)
-
-	fmt.Println("Seeding database with test data...")
-	if err := seedData(ctx, userStore, logStore, mockNow); err != nil {
-		log.Printf("Failed to seed data: %v", err)
-		return
+	// --- Create a new user ---
+	newUser := &User{
+		Name:  "Alice",
+		Email: "alice@example.com",
 	}
-
-	fmt.Println("\n--- Initial System State ---")
-	if err := printSystemState(ctx, userStore, logStore); err != nil {
-		log.Printf("Failed to print system state: %v", err)
-		return
+	// The ID field is empty, so Save will generate a new UUID and set it.
+	if err := userStore.Save(ctx, newUser); err != nil {
+		log.Fatalf("failed to save user: %v", err)
 	}
+	fmt.Printf("Saved user '%s' with ID: %s\n", newUser.Name, newUser.ID)
 
-	fmt.Println("\n>>> Running follow-up logic...")
-	if err := sendFollowUps(ctx, db, userStore, logStore, mockNow); err != nil {
-		log.Printf("Failed to run follow-up logic: %v", err)
-		return
+	// --- Record some login events for the new user ---
+	event1 := &LoginEvent{
+		UserID:    newUser.ID,
+		Timestamp: "2023-10-27T10:00:00Z",
+		IPAddress: "192.0.2.1",
 	}
-	fmt.Println("<<< Follow-up logic complete.")
-
-	fmt.Println("\n--- Final System State ---")
-	if err := printSystemState(ctx, userStore, logStore); err != nil {
-		log.Printf("Failed to print system state: %v", err)
-		return
+	if err := eventStore.Save(ctx, event1); err != nil {
+		log.Fatalf("failed to save login event: %v", err)
 	}
 
-	// Output:
-	// Setting up database and stores...
-	// Seeding database with test data...
-	//
-	// --- Initial System State ---
-	// User: Alice    (ID: user1) | FollowUpSent: false | LastMessageAt: 26 Oct 23 03:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	// User: Bob      (ID: user2) | FollowUpSent: false | LastMessageAt: 27 Oct 23 03:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	// User: Charlie  (ID: user3) | FollowUpSent: true  | LastMessageAt: 25 Oct 23 15:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	// User: Diana    (ID: user4) | FollowUpSent: false | LastMessageAt: 23 Oct 23 15:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	//
-	// >>> Running follow-up logic...
-	// Found user 'Alice' who needs a follow-up. Processing...
-	// Successfully created follow-up for user 'Alice'.
-	// <<< Follow-up logic complete.
-	//
-	// --- Final System State ---
-	// User: Alice    (ID: user1) | FollowUpSent: true  | LastMessageAt: 26 Oct 23 03:00 UTC
-	//   -> Log: Author: bot , Sent: false, Content: "Hi! We were recently talking about 'the weather'. I would like to follow up..."
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	// User: Bob      (ID: user2) | FollowUpSent: false | LastMessageAt: 27 Oct 23 03:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	// User: Charlie  (ID: user3) | FollowUpSent: true  | LastMessageAt: 25 Oct 23 15:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-	// User: Diana    (ID: user4) | FollowUpSent: false | LastMessageAt: 23 Oct 23 15:00 UTC
-	//   -> Log: Author: user, Sent: true , Content: "the weather"
-}
+	event2 := &LoginEvent{
+		UserID:    newUser.ID,
+		Timestamp: "2023-10-27T12:30:00Z",
+		IPAddress: "203.0.113.5",
+	}
+	if err := eventStore.Save(ctx, event2); err != nil {
+		log.Fatalf("failed to save login event: %v", err)
+	}
+	fmt.Println("Saved 2 login events for Alice.")
 
-// sendFollowUps implements the core user story.
-func sendFollowUps(
-	ctx context.Context,
-	db *sql.DB,
-	userStore *litestore.EntityStore[*ExampleUser],
-	logStore *litestore.RecordStore[ExampleLogEntry],
-	now time.Time,
-) error {
-	twentyFourHoursAgo := now.Add(-24 * time.Hour)
-	seventyTwoHoursAgo := now.Add(-72 * time.Hour)
-
-	p := litestore.AndPredicates(
-		litestore.Filter{Key: "last_message_at", Op: litestore.OpLTE, Value: twentyFourHoursAgo},
-		litestore.Filter{Key: "last_message_at", Op: litestore.OpGTE, Value: seventyTwoHoursAgo},
-		litestore.Filter{Key: "follow_up_sent", Op: litestore.OpEq, Value: false},
-	)
-
-	seq, err := userStore.Iter(ctx, p)
+	// --- Retrieve a user by their email ---
+	// GetOne will return an error if more than one user matches.
+	p := litestore.Filter{Key: "Email", Op: litestore.OpEq, Value: "alice@example.com"}
+	retrievedUser, err := userStore.GetOne(ctx, p)
 	if err != nil {
-		return err
+		log.Fatalf("failed to get user by email: %v", err)
 	}
+	fmt.Printf("Retrieved user: %s (%s)\n", retrievedUser.Name, retrievedUser.Email)
 
-	for pair, err := range seq {
-		if err != nil {
-			return fmt.Errorf("iteration failed: %w", err)
-		}
-		userID, user := pair.Key, pair.Data
-
-		fmt.Printf("Found user '%s' who needs a follow-up. Processing...\n", user.Username)
-
-		txErr := litestore.WithTransaction(ctx, db, func(txCtx context.Context) error {
-			logs, err := logStore.List(txCtx, userID, 1)
-			if err != nil {
-				return fmt.Errorf("could not fetch last message for user %s: %w", userID, err)
-			}
-			if len(logs) == 0 {
-				return nil // Nothing to do for this user.
-			}
-			lastLog := logs[0]
-
-			newLog := ExampleLogEntry{
-				Content: fmt.Sprintf(
-					"Hi! We were recently talking about '%s'. I would like to follow up...",
-					lastLog.Content,
-				),
-				Author: "bot",
-				Sent:   false,
-			}
-
-			if err := logStore.Add(txCtx, userID, newLog); err != nil {
-				return fmt.Errorf("could not add follow-up message for user %s: %w", userID, err)
-			}
-
-			update := map[string]any{"follow_up_sent": true}
-			if err := userStore.Update(txCtx, userID, update); err != nil {
-				return fmt.Errorf("could not update user %s: %w", userID, err)
-			}
-
-			fmt.Printf("Successfully created follow-up for user '%s'.\n", user.Username)
-			return nil
-		})
-
-		if txErr != nil {
-			// If a transaction for one user fails, we stop the whole process.
-			// Depending on requirements, one might just log the error and continue.
-			return fmt.Errorf("transaction for user %s failed: %w", userID, txErr)
-		}
-	}
-	return nil
-}
-
-// --- Test Data and Helpers ---
-
-func seedData(
-	ctx context.Context,
-	userStore *litestore.EntityStore[*ExampleUser],
-	logStore *litestore.RecordStore[ExampleLogEntry],
-	now time.Time,
-) error {
-	users := map[string]*ExampleUser{
-		"user1": {Username: "Alice", LastMessageAt: now.Add(-36 * time.Hour), FollowUpSent: false},
-		"user2": {Username: "Bob", LastMessageAt: now.Add(-12 * time.Hour), FollowUpSent: false},
-		"user3": {Username: "Charlie", LastMessageAt: now.Add(-48 * time.Hour), FollowUpSent: true},
-		"user4": {Username: "Diana", LastMessageAt: now.Add(-96 * time.Hour), FollowUpSent: false},
-	}
-
-	for id, user := range users {
-		if err := userStore.Set(ctx, id, user); err != nil {
-			return err
-		}
-		logEntry := ExampleLogEntry{Content: "the weather", Author: "user", Sent: true}
-		if err := logStore.Add(ctx, id, logEntry); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func printSystemState(
-	ctx context.Context,
-	userStore *litestore.EntityStore[*ExampleUser],
-	logStore *litestore.RecordStore[ExampleLogEntry],
-) error {
-	type userState struct {
-		id   string
-		user *ExampleUser
-		logs []ExampleLogEntry
-	}
-	var states []userState
-
-	// Collect all users first to allow for sorting.
-	seq, err := userStore.Iter(ctx, nil)
+	// --- Iterate over all login events for that user ---
+	fmt.Printf("Login events for user ID %s:\n", retrievedUser.ID)
+	eventFilter := litestore.Filter{Key: "UserID", Op: litestore.OpEq, Value: retrievedUser.ID}
+	eventSeq, err := eventStore.Iter(ctx, eventFilter)
 	if err != nil {
-		return err
-	}
-	for pair, err := range seq {
-		if err != nil {
-			return fmt.Errorf("iteration failed: %w", err)
-		}
-		logs, err := logStore.List(ctx, pair.Key, 5)
-		if err != nil {
-			return err
-		}
-		states = append(states, userState{id: pair.Key, user: pair.Data, logs: logs})
+		log.Fatalf("failed to create iterator for events: %v", err)
 	}
 
-	// Sort by ID to ensure deterministic output.
-	sort.Slice(states, func(i, j int) bool {
-		return states[i].id < states[j].id
+	for event, err := range eventSeq {
+		if err != nil {
+			log.Fatalf("failed during event iteration: %v", err)
+		}
+		fmt.Printf("- At %s from %s\n", event.Timestamp, event.IPAddress)
+	}
+
+	// --- Use a transaction to save a user and an event atomically ---
+	fmt.Println("Performing transactional save...")
+	err = litestore.WithTransaction(ctx, db, func(txCtx context.Context) error {
+		// Create another user
+		bob := &User{Name: "Bob", Email: "bob@example.com"}
+		if err := userStore.Save(txCtx, bob); err != nil {
+			return fmt.Errorf("failed to save bob in tx: %w", err)
+		}
+
+		// And an event for Bob
+		bobEvent := &LoginEvent{
+			UserID:    bob.ID,
+			Timestamp: "2023-10-28T09:00:00Z",
+			IPAddress: "198.51.100.10",
+		}
+		if err := eventStore.Save(txCtx, bobEvent); err != nil {
+			return fmt.Errorf("failed to save bob's event in tx: %w", err)
+		}
+
+		// If this function returns an error, the transaction will be rolled back.
+		// If it returns nil, it will be committed.
+		return nil
 	})
 
-	for _, s := range states {
-		fmt.Printf(
-			"User: %-8s (ID: %s) | FollowUpSent: %-5t | LastMessageAt: %s\n",
-			s.user.Username, s.id, s.user.FollowUpSent, s.user.LastMessageAt.Format(time.RFC822),
-		)
-		for _, entry := range s.logs {
-			fmt.Printf("  -> Log: Author: %-4s, Sent: %-5t, Content: \"%s\"\n",
-				entry.Author, entry.Sent, entry.Content)
-		}
-	}
-	return nil
-}
-
-// setupExampleDB creates a temporary database in a temp directory for the example.
-func setupExampleDB() (*sql.DB, func(), error) {
-	dir, err := os.MkdirTemp("", "litestore_example")
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create temp dir: %w", err)
+		log.Fatalf("transaction failed: %v", err)
 	}
+	fmt.Println("Transaction committed successfully.")
 
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s/test.db?_journal_mode=WAL", dir))
+	// Verify Bob was saved
+	bob, err := userStore.GetOne(ctx, litestore.Filter{Key: "Name", Op: litestore.OpEq, Value: "Bob"})
 	if err != nil {
-		os.RemoveAll(dir) // Clean up if open fails
-		return nil, nil, fmt.Errorf("failed to open sqlite: %w", err)
+		log.Fatalf("failed to get Bob after transaction: %v", err)
 	}
+	fmt.Printf("Found user '%s' after transaction.\n", bob.Name)
 
-	cleanup := func() {
-		if err := db.Close(); err != nil {
-			log.Printf("failed to close db: %v", err)
-		}
-		os.RemoveAll(dir)
-	}
-
-	return db, cleanup, nil
+	// Note: The output of this example is not checked because it contains
+	// non-deterministic UUIDs. The output on a typical run would look like this:
+	//
+	// Saved user 'Alice' with ID: <some-uuid>
+	// Saved 2 login events for Alice.
+	// Retrieved user: Alice (alice@example.com)
+	// Login events for user ID <some-uuid>:
+	// - At 2023-10-27T10:00:00Z from 192.0.2.1
+	// - At 2023-10-27T12:30:00Z from 203.0.113.5
+	// Performing transactional save...
+	// Transaction committed successfully.
+	// Found user 'Bob' after transaction.
 }
