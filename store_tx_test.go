@@ -14,13 +14,13 @@ func TestStore_Transactions(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestEntity](context.Background(), db, "test_entities_tx")
-	if err != nil {
-		t.Fatalf("failed to create new store: %v", err)
-	}
-	defer s.Close()
-
 	t.Run("Save on transaction commit", func(t *testing.T) {
+		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_save_commit")
+		if err != nil {
+			t.Fatalf("failed to create new store: %v", err)
+		}
+		defer s.Close()
+
 		entity := &TestEntity{Name: "tx-commit"}
 		ctxNoTx := context.Background()
 
@@ -68,6 +68,12 @@ func TestStore_Transactions(t *testing.T) {
 	})
 
 	t.Run("Save on transaction rollback", func(t *testing.T) {
+		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_save_rollback")
+		if err != nil {
+			t.Fatalf("failed to create new store: %v", err)
+		}
+		defer s.Close()
+
 		entity := &TestEntity{Name: "tx-rollback"}
 		ctxNoTx := context.Background()
 
@@ -97,6 +103,12 @@ func TestStore_Transactions(t *testing.T) {
 	})
 
 	t.Run("Delete on transaction commit", func(t *testing.T) {
+		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_delete_commit")
+		if err != nil {
+			t.Fatalf("failed to create new store: %v", err)
+		}
+		defer s.Close()
+
 		entity := &TestEntity{Name: "tx-delete-commit"}
 		ctxNoTx := context.Background()
 		if err := s.Save(ctxNoTx, entity); err != nil {
@@ -141,6 +153,12 @@ func TestStore_Transactions(t *testing.T) {
 	})
 
 	t.Run("Delete on transaction rollback", func(t *testing.T) {
+		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_delete_rollback")
+		if err != nil {
+			t.Fatalf("failed to create new store: %v", err)
+		}
+		defer s.Close()
+
 		entity := &TestEntity{Name: "tx-delete-rollback"}
 		ctxNoTx := context.Background()
 		if err := s.Save(ctxNoTx, entity); err != nil {
@@ -173,6 +191,12 @@ func TestStore_Transactions(t *testing.T) {
 	})
 
 	t.Run("Iter sees transactional state", func(t *testing.T) {
+		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_iter_state")
+		if err != nil {
+			t.Fatalf("failed to create new store: %v", err)
+		}
+		defer s.Close()
+
 		ctxNoTx := context.Background()
 		e1 := &TestEntity{Name: "iter-tx-1"}
 		if err := s.Save(ctxNoTx, e1); err != nil {

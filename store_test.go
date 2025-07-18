@@ -123,7 +123,7 @@ func TestStore_Save_NoID(t *testing.T) {
 	}
 
 	// We can't know the ID, but we can query for the content.
-	got, err := s.GetOne(ctx, litestore.Filter{Key: "Info", Op: litestore.OpEq, Value: "some info"})
+	got, err := s.GetOne(ctx, litestore.Filter{Key: "info", Op: litestore.OpEq, Value: "some info"})
 	if err != nil {
 		t.Fatalf("failed to get entity by content: %v", err)
 	}
@@ -157,14 +157,14 @@ func TestStore_GetOne_Errors(t *testing.T) {
 	}
 
 	t.Run("get one with no results", func(t *testing.T) {
-		_, err := s.GetOne(ctx, litestore.Filter{Key: "Name", Op: litestore.OpEq, Value: "non-existent"})
+		_, err := s.GetOne(ctx, litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "non-existent"})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected sql.ErrNoRows, got %v", err)
 		}
 	})
 
 	t.Run("get one with multiple results", func(t *testing.T) {
-		_, err := s.GetOne(ctx, litestore.Filter{Key: "Category", Op: litestore.OpEq, Value: "A"})
+		_, err := s.GetOne(ctx, litestore.Filter{Key: "category", Op: litestore.OpEq, Value: "A"})
 		if err == nil {
 			t.Fatal("expected an error for multiple results, got nil")
 		}
@@ -220,8 +220,8 @@ func TestStore_Iter(t *testing.T) {
 	t.Run("simple AND query", func(t *testing.T) {
 		var results []TestEntity
 		p := litestore.AndPredicates(
-			litestore.Filter{Key: "IsActive", Op: litestore.OpEq, Value: true},
-			litestore.Filter{Key: "Value", Op: litestore.OpGTE, Value: 35},
+			litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
+			litestore.Filter{Key: "value", Op: litestore.OpGTE, Value: 35},
 		)
 		seq, err := s.Iter(ctx, p)
 		if err != nil {
@@ -247,10 +247,10 @@ func TestStore_Iter(t *testing.T) {
 		var results []TestEntity
 		p := litestore.OrPredicates(
 			litestore.AndPredicates(
-				litestore.Filter{Key: "IsActive", Op: litestore.OpEq, Value: true},
-				litestore.Filter{Key: "Value", Op: litestore.OpLT, Value: 35},
+				litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
+				litestore.Filter{Key: "value", Op: litestore.OpLT, Value: 35},
 			),
-			litestore.Filter{Key: "Name", Op: litestore.OpEq, Value: "charlie"},
+			litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "charlie"},
 		)
 		seq, err := s.Iter(ctx, p)
 		if err != nil {
@@ -294,7 +294,7 @@ func TestStore_Iter(t *testing.T) {
 
 	t.Run("break stops iteration", func(t *testing.T) {
 		var processedIDs []string
-		p := litestore.Filter{Key: "Category", Op: litestore.OpEq, Value: "A"} // Should match 2 entities
+		p := litestore.Filter{Key: "category", Op: litestore.OpEq, Value: "A"} // Should match 2 entities
 
 		seq, err := s.Iter(ctx, p)
 		if err != nil {
@@ -320,7 +320,7 @@ func TestStore_Iter(t *testing.T) {
 	})
 
 	t.Run("query with invalid operator", func(t *testing.T) {
-		p := litestore.Filter{Key: "Value", Op: "INVALID", Value: 10}
+		p := litestore.Filter{Key: "value", Op: "INVALID", Value: 10}
 		seq, err := s.Iter(ctx, p)
 		if err == nil {
 			t.Fatal("expected an error for invalid operator, got nil")

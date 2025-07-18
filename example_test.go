@@ -89,7 +89,7 @@ func Example() {
 
 	// --- Retrieve a user by their email ---
 	// GetOne will return an error if more than one user matches.
-	p := litestore.Filter{Key: "Email", Op: litestore.OpEq, Value: "alice@example.com"}
+	p := litestore.Filter{Key: "email", Op: litestore.OpEq, Value: "alice@example.com"}
 	retrievedUser, err := userStore.GetOne(ctx, p)
 	if err != nil {
 		log.Fatalf("failed to get user by email: %v", err)
@@ -98,7 +98,7 @@ func Example() {
 
 	// --- Iterate over all login events for that user ---
 	fmt.Printf("Login events for user ID %s:\n", retrievedUser.ID)
-	eventFilter := litestore.Filter{Key: "UserID", Op: litestore.OpEq, Value: retrievedUser.ID}
+	eventFilter := litestore.Filter{Key: "user_id", Op: litestore.OpEq, Value: retrievedUser.ID}
 	eventSeq, err := eventStore.Iter(ctx, eventFilter)
 	if err != nil {
 		log.Fatalf("failed to create iterator for events: %v", err)
@@ -141,7 +141,7 @@ func Example() {
 	fmt.Println("Transaction committed successfully.")
 
 	// Verify Bob was saved
-	bob, err := userStore.GetOne(ctx, litestore.Filter{Key: "Name", Op: litestore.OpEq, Value: "Bob"})
+	bob, err := userStore.GetOne(ctx, litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "Bob"})
 	if err != nil {
 		log.Fatalf("failed to get Bob after transaction: %v", err)
 	}
