@@ -156,10 +156,13 @@ func (s *Store[T]) Delete(ctx context.Context, key string) error {
 }
 
 // GetOne retrieves a single entity that matches the given predicate.
-// It returns an error if no entity is found, or if more than one entity is found.
+// It returns sql.ErrNoRows if no entity is found, or an error if more than one is found.
 func (s *Store[T]) GetOne(ctx context.Context, p Predicate) (T, error) {
 	var zero T
-	seq, err := s.Iter(ctx, p)
+	// We only need to know if there is 0, 1, or >1 result.
+	// Limiting to 2 is an optimization.
+	q := &Query{Predicate: p, Limit: 2}
+	seq, err := s.Iter(ctx, q)
 	if err != nil {
 		return zero, err
 	}
@@ -197,17 +200,17 @@ func (s *Store[T]) GetOne(ctx context.Context, p Predicate) (T, error) {
 	return result, nil
 }
 
-// Iter returns an iterator over entities that match the given predicate.
-// If the predicate is nil, it iterates over all entities.
+// Iter returns an iterator over entities that match a given query.
+// If the query is nil, it iterates over all entities.
 // The iterator yields an entity and an error for each item.
-func (s *Store[T]) Iter(ctx context.Context, p Predicate) (iter.Seq2[T, error], error) {
+func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], error) {
 	var queryBuilder strings.Builder
 	args := []any{}
 
-	queryBuilder.WriteString(fmt.Sprintf("SELECT json FROM %s", s.tableName))
+	queryBuilder.WriteString(fmt.Sprintf("SELECT key, json FROM %s", s.tableName))
 
-	if p != nil {
-		whereClause, whereArgs, err := s.buildWhereClause(p)
+	if q != nil && q.Predicate != nil {
+		whereClause, whereArgs, err := s.buildWhereClause(q.Predicate)
 		if err != nil {
 			return nil, err
 		}
@@ -216,6 +219,33 @@ func (s *Store[T]) Iter(ctx context.Context, p Predicate) (iter.Seq2[T, error], 
 			queryBuilder.WriteString(whereClause)
 			args = append(args, whereArgs...)
 		}
+	}
+
+	if q != nil && len(q.OrderBy) > 0 {
+		var orderClauses []string
+		for _, o := range q.OrderBy {
+			if o.Direction != OrderAsc && o.Direction != OrderDesc {
+				return nil, fmt.Errorf("invalid order direction: %s", o.Direction)
+			}
+			// We can't use a parameter for the column name in ORDER BY.
+			// The key column is safe. JSON paths are also safe when used with json_extract.
+			if o.Key == "key" {
+				orderClauses = append(orderClauses, fmt.Sprintf("key %s", o.Direction))
+			} else {
+				if strings.ContainsAny(o.Key, ";)") {
+					return nil, fmt.Errorf("invalid character in order by key: %s", o.Key)
+				}
+				orderClauses = append(orderClauses, fmt.Sprintf("json_extract(json, ?) %s", o.Direction))
+				args = append(args, "$."+o.Key)
+			}
+		}
+		queryBuilder.WriteString(" ORDER BY ")
+		queryBuilder.WriteString(strings.Join(orderClauses, ", "))
+	}
+
+	if q != nil && q.Limit > 0 {
+		queryBuilder.WriteString(" LIMIT ?")
+		args = append(args, q.Limit)
 	}
 
 	var rows *sql.Rows
@@ -240,8 +270,8 @@ func (s *Store[T]) Iter(ctx context.Context, p Predicate) (iter.Seq2[T, error], 
 				yield(zero, err)
 				return
 			}
-			var jsonData string
-			if scanErr := rows.Scan(&jsonData); scanErr != nil {
+			var key, jsonData string
+			if scanErr := rows.Scan(&key, &jsonData); scanErr != nil {
 				yield(zero, fmt.Errorf("scanning entity data row: %w", scanErr))
 				return
 			}
@@ -278,6 +308,9 @@ func (s *Store[T]) buildWhereClause(p Predicate) (string, []any, error) {
 		sql := fmt.Sprintf("json_extract(json, ?) %s ?", v.Op)
 		args := []any{"$." + v.Key, v.Value}
 		return sql, args, nil
+
+	case CustomPredicate:
+		return v.Clause, v.Args, nil
 
 	case And:
 		return s.joinPredicates(v.Predicates, "AND")

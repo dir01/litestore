@@ -223,7 +223,8 @@ func TestStore_Iter(t *testing.T) {
 			litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
 			litestore.Filter{Key: "value", Op: litestore.OpGTE, Value: 35},
 		)
-		seq, err := s.Iter(ctx, p)
+		q := &litestore.Query{Predicate: p}
+		seq, err := s.Iter(ctx, q)
 		if err != nil {
 			t.Fatalf("Iter failed: %v", err)
 		}
@@ -252,7 +253,8 @@ func TestStore_Iter(t *testing.T) {
 			),
 			litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "charlie"},
 		)
-		seq, err := s.Iter(ctx, p)
+		q := &litestore.Query{Predicate: p}
+		seq, err := s.Iter(ctx, q)
 		if err != nil {
 			t.Fatalf("Iter failed: %v", err)
 		}
@@ -295,8 +297,8 @@ func TestStore_Iter(t *testing.T) {
 	t.Run("break stops iteration", func(t *testing.T) {
 		var processedIDs []string
 		p := litestore.Filter{Key: "category", Op: litestore.OpEq, Value: "A"} // Should match 2 entities
-
-		seq, err := s.Iter(ctx, p)
+		q := &litestore.Query{Predicate: p}
+		seq, err := s.Iter(ctx, q)
 		if err != nil {
 			t.Fatalf("Iter failed: %v", err)
 		}
@@ -321,12 +323,69 @@ func TestStore_Iter(t *testing.T) {
 
 	t.Run("query with invalid operator", func(t *testing.T) {
 		p := litestore.Filter{Key: "value", Op: "INVALID", Value: 10}
-		seq, err := s.Iter(ctx, p)
+		q := &litestore.Query{Predicate: p}
+		seq, err := s.Iter(ctx, q)
 		if err == nil {
 			t.Fatal("expected an error for invalid operator, got nil")
 		}
 		if seq != nil {
 			t.Fatal("expected a nil iterator when an error occurs")
+		}
+	})
+
+	t.Run("query with order and limit", func(t *testing.T) {
+		var results []TestEntity
+		q := &litestore.Query{
+			Predicate: litestore.Filter{Key: "category", Op: litestore.OpEq, Value: "A"}, // alice, bob
+			OrderBy: []litestore.OrderBy{
+				{Key: "value", Direction: litestore.OrderDesc},
+			},
+			Limit: 1,
+		}
+		seq, err := s.Iter(ctx, q)
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+		for entity, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			results = append(results, entity)
+		}
+
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
+		// bob has value 45, alice has 30. DESC should return bob.
+		if results[0].Name != "bob" {
+			t.Errorf("expected bob, got %s", results[0].Name)
+		}
+	})
+
+	t.Run("query with custom predicate", func(t *testing.T) {
+		var results []TestEntity
+		// Find entities where the length of the name is 3.
+		p := litestore.CustomPredicate{
+			Clause: "LENGTH(json_extract(json, ?)) = ?",
+			Args:   []any{"$.name", 3},
+		}
+		q := &litestore.Query{Predicate: p}
+		seq, err := s.Iter(ctx, q)
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+		for entity, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			results = append(results, entity)
+		}
+
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d, want 1", len(results))
+		}
+		if results[0].Name != "bob" {
+			t.Errorf("expected bob, got %s", results[0].Name)
 		}
 	})
 }
