@@ -156,8 +156,7 @@ func (s *Store[T]) Delete(ctx context.Context, key string) error {
 }
 
 // GetOne retrieves a single entity that matches the given predicate.
-// If no entity matches, it returns the zero value of T and an error.
-// If multiple entities match, it returns the first one found.
+// It returns an error if no entity is found, or if more than one entity is found.
 func (s *Store[T]) GetOne(ctx context.Context, p Predicate) (T, error) {
 	var zero T
 	seq, err := s.Iter(ctx, p)
@@ -167,27 +166,32 @@ func (s *Store[T]) GetOne(ctx context.Context, p Predicate) (T, error) {
 
 	var result T
 	var iterErr error
-	found := false
+	count := 0
 
-	// The `for range` over a Seq2 will call the underlying iterator function.
-	// The `break` will cause the `yield` function to return `false`,
-	// which will stop the `for rows.Next()` loop in `Iter`.
 	for entity, err := range seq {
 		if err != nil {
 			iterErr = err
 			break
 		}
-		result = entity
-		found = true
-		break // We only want the first one.
+		if count == 0 {
+			result = entity
+		}
+		count++
+		if count > 1 {
+			break
+		}
 	}
 
 	if iterErr != nil {
 		return zero, fmt.Errorf("iteration failed while getting one: %w", iterErr)
 	}
 
-	if !found {
+	if count == 0 {
 		return zero, fmt.Errorf("no entity found matching predicate: %w", sql.ErrNoRows)
+	}
+
+	if count > 1 {
+		return zero, fmt.Errorf("expected one result, but found multiple")
 	}
 
 	return result, nil
