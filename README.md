@@ -1,124 +1,134 @@
 # litestore
 
-`litestore` is a schemaless but typesafe storage for go powered by SQLite/json.
+`litestore` is a lightweight, schemaless, and typesafe storage layer for Go, built on top of SQLite. It provides a simple and intuitive API for persisting Go structs as JSON data, without the complexity of a full-featured ORM.
 
-It is minimalistic, opinionated, and allows you to start using it in shortest time
-while not impeding your success in the future.
-
-It is based on SQLite which combined with [litestream](https://litestream.io/)
-creates a virtually free serverless database.
-
-## Example
+[![Go Reference](https://pkg.go.dev/badge/github.com/dir01/litestore.svg)](https://pkg.go.dev/github.com/dir01/litestore)
 
 ## Key Features
-- Not an ORM, but a store
-- Minimalistic and opinionated
-- Schemaless but typesafe
-- Supports transactions
-- Easy to start using (no schema, no migrations, no SQL queries to write)
-- Add indexes as performance becomes a concern
-- Add classic SQL as complexity needs grow
-- Eject and replace with custom store anytime
 
+*   **Schemaless & Typesafe**: Store your Go structs directly without defining a schema, while still benefiting from Go's type safety.
+*   **Simple API**: A minimal and opinionated API for common CRUD operations.
+*   **Flexible Querying**: Build complex queries using a simple and composable predicate system.
+*   **Transactional Support**: Execute multiple operations in a single, atomic transaction.
+*   **Zero-Dependency**: The entire database is a single file on disk, making it perfect for simple applications, command-line tools, and prototypes.
 
-## Implementation Details
-`litestore` consists of two components
+## Getting Started
 
-- `EntityStore` has a CRUD-like (Create, Read, Update, Delete) personality:
-    - `Get(ctx, entityID)`: Fetches a single, unique entity.
-    - `Set(ctx, entityID, entity)`: Creates or replaces an entity at a specific key. It's idempotent (may be executed multiple times with the same result)
-    - `Update(ctx, entityID, partial map[string]any)`: Performs a partial modification of an existing entity.
-    - The key is the canonical identifier.
- • `RecordStore` has a Stream-like (Append-only) personality:
-    • Add(entityID, item): Appends a new record to a collection. It is not idempotent; calling it twice creates two records.
-    • List(entityID): Retrieves a list of recent records.
-    • There is no Update method. You don't typically "update" a log entry or an activity feed item; you might add a new one that supersedes it.
+First, add `litestore` to your project:
 
-
-
-## Why
-OK so I've been launching a lot of pet projects lately.
-In a pet project, you want your costs to be minimal, preferably zero.
-This is something we should strive for in a professional setting as well, if you ask me.
-
-So for my database needs, I've been using SQLite + litestream as a great semi-resilient serverless database.
-At some point, I got tired of constant migrations and schema changes, 
-and decided to go all `CREATE TABLE data (key TEXT PRIMARY KEY, json TEXT NOT NULL)`
-
-That worked while I had to manage user settings and such, 
-
-
-## Suitable Projects
-Expected lifecycle of a project using `litestore` + SQLite + litestream looks like this
-
-```mermaid
-flowchart TD
-    A[Project Start] -->|Start Writing Data| C{Project Success}
-    C -->|"5 MAU<br>(99.9% projects end up here)"| D[Do nothing]
-    C -->|"Growing MAU<br>(Ooh, a lucky one)"| E[Create some<br>indexes by hand]
-    C -->|"Growing complexity<br>(adding features with 5 MAU? Smart!)"| F[Use bare SQLite]
+```sh
+go get github.com/dir01/litestore
 ```
 
----------
-Based on our work together, here is my overall analysis of the litestore library.
+Next, you can use `litestore` to save and retrieve your Go structs:
 
-Overall Assessment
+```go
+package main
 
-This is a very well-designed, modern, and focused Go library. It provides a clean, type-safe, and idiomatic API for common persistence patterns on
-top of an embedded SQLite database. It successfully avoids the complexity of a full ORM while offering much more structure and safety than raw SQL
-queries.
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
 
-It's an excellent example of how to leverage modern Go features like generics and context-awareness to create a powerful and easy-to-use tool.
+	"github.com/dir01/litestore"
+	"_github.com/mattn/go-sqlite3"
+)
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Strengths (What it does well)
+// User represents a user in our system.
+type User struct {
+	ID    string `litestore:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
 
- 1 Excellent Use of Generics: The use of [T any] in both EntityStore and RecordsStore is the library's standout feature. It provides compile-time
-   type safety, eliminates the need for type assertions in user code, and makes the API incredibly clean and intuitive.
- 2 Idiomatic API Design: The library follows modern Go best practices:
-    • Context-Awareness: All database-interacting methods correctly accept a context.Context, allowing for proper cancellation, timeouts, and
-      deadline propagation.
-    • Resource Management: The Close() methods on the stores ensure that prepared statements are properly released, preventing resource leaks.
-    • Clear Naming: The names EntityStore (for key-value access) and RecordsStore (for collections) clearly communicate their purpose.
- 3 Good Balance of Simplicity and Power:
-    • The Predicate system (Filter, And, Or) is a great abstraction. It allows users to build complex queries in a structured way without exposing
-      them to the messiness of SQL string concatenation, while still being powerful enough for many use cases.
-    • It doesn't try to be a full-featured ORM, which keeps its scope narrow and its implementation understandable.
- 4 Performance-Conscious: The use of prepared statements for all repetitive queries (Get, Set, Add, List) shows a commitment to performance by
-   reducing the overhead of query parsing on the database.
- 5 Zero-Dependency and Embeddable: By building on go-sqlite3, the entire database can be a single file on disk or even in-memory, making it perfect
-   for simple applications, command-line tools, and prototypes without requiring an external database server.
+func main() {
+	// Open the SQLite database.
+	db, err := sql.Open("sqlite3", "example.db")
+	if err != nil {
+		log.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Areas for Improvement (Constructive Suggestions)
+	ctx := context.Background()
 
- 1 Error Handling Granularity: The library currently returns errors created with fmt.Errorf. This is fine for logging, but it makes it difficult for
-   calling code to programmatically handle different error conditions. For example, you can't easily distinguish between a "not found" error and a
-   "database connection failed" error.
-    • Suggestion: Define exported error variables (e.g., var ErrNotFound = errors.New("not found")) or custom error types. This would allow users to
-      write code like if errors.Is(err, litestore.ErrNotFound) { ... }.
- 2 Lack of User-Managed Transactions: The Update method correctly uses a transaction internally, but the library doesn't provide a way for a user to
-   run multiple operations in a single, atomic transaction. For example, you can't atomically Set an entity and then Add a record to its collection.
-    • Suggestion: Consider adding a WithTransaction method that would provide a transactional version of the store to a callback function, ensuring
-      that all operations within the callback are committed or rolled back together.
- 3 Query Performance at Scale: The ForEach method relies on json_extract to query fields within the JSON blob. While flexible, this approach cannot
-   use database indexes and will result in a full table scan for every query. This will be very slow on tables with hundreds of thousands or
-   millions of rows.
-    • Suggestion: This is a fundamental trade-off of the JSON-in-a-column design. For now, it would be valuable to document this limitation clearly.
-      A future, more advanced version could explore creating actual indexed columns for specific JSON fields that need to be queried frequently.
+	// Create a store for User entities.
+	userStore, err := litestore.NewStore[User](ctx, db, "users")
+	if err != nil {
+		log.Fatalf("failed to create user store: %v", err)
+	}
+	defer userStore.Close()
 
-Conclusion
+	// --- Create a new user ---
+	newUser := &User{
+		Name:  "Alice",
+		Email: "alice@example.com",
+	}
+	if err := userStore.Save(ctx, newUser); err != nil {
+		log.Fatalf("failed to save user: %v", err)
+	}
+	fmt.Printf("Saved user '%s' with ID: %s\n", newUser.Name, newUser.ID)
 
-This is a high-quality library that is exceptionally good for its intended purpose: providing simple, type-safe, and embeddable persistence for Go
-applications. Its strengths in API design and modern Go practices far outweigh its limitations.
+	// --- Retrieve a user by their email ---
+	retrievedUser, err := userStore.GetOne(ctx, litestore.Filter{Key: "email", Op: litestore.OpEq, Value: "alice@example.com"})
+	if err != nil {
+		log.Fatalf("failed to get user by email: %v", err)
+	}
+	fmt.Printf("Retrieved user: %s (%s)\n", retrievedUser.Name, retrievedUser.Email)
+}
+```
 
-It would be a perfect choice for:
+## Querying
 
- • Configuration management for an application.
- • Persistence for desktop or CLI tools.
- • A simple caching layer.
- • Prototyping and MVPs where a full database is overkill.
+`litestore` provides a flexible querying system that allows you to build complex queries using a simple and composable predicate system.
 
-I would confidently recommend it for any project that fits within its scope.
+### Filters
 
+A `Filter` represents a single condition in a query. For example, to find all users with the name "Alice", you would use the following filter:
 
+```go
+litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "Alice"}
+```
+
+### Combining Predicates
+
+You can combine multiple predicates using `AndPredicates` and `OrPredicates` to create more complex queries. For example, to find all users with the name "Alice" who are also active, you would use the following query:
+
+```go
+litestore.AndPredicates(
+	litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "Alice"},
+	litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
+)
+```
+
+### Ordering and Limiting
+
+You can also order and limit your query results using the `OrderBy` and `Limit` fields of the `Query` struct.
+
+```go
+q := &litestore.Query{
+	Predicate: litestore.Filter{Key: "category", Op: litestore.OpEq, Value: "A"},
+	OrderBy: []litestore.OrderBy{
+		{Key: "value", Direction: litestore.OrderDesc},
+	},
+	Limit: 10,
+}
+```
+
+## Transactions
+
+`litestore` supports transactions, allowing you to execute multiple operations in a single, atomic transaction. The `WithTransaction` function provides a simple and convenient way to work with transactions:
+
+```go
+err = litestore.WithTransaction(ctx, db, func(txCtx context.Context) error {
+	// Create a new user
+	bob := &User{Name: "Bob", Email: "bob@example.com"}
+	if err := userStore.Save(txCtx, bob); err != nil {
+		return fmt.Errorf("failed to save bob in tx: %w", err)
+	}
+
+	// If this function returns an error, the transaction will be rolled back.
+	// If it returns nil, it will be committed.
+	return nil
+})
+```
