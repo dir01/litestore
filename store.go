@@ -204,57 +204,23 @@ func (s *Store[T]) GetOne(ctx context.Context, p Predicate) (T, error) {
 // If the query is nil, it iterates over all entities.
 // The iterator yields an entity and an error for each item.
 func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], error) {
-	var queryBuilder strings.Builder
-	args := []any{}
-
-	queryBuilder.WriteString(fmt.Sprintf("SELECT key, json FROM %s", s.tableName))
-
-	if q != nil && q.Predicate != nil {
-		whereClause, whereArgs, err := s.buildWhereClause(q.Predicate)
-		if err != nil {
-			return nil, err
-		}
-		if whereClause != "" {
-			queryBuilder.WriteString(" WHERE ")
-			queryBuilder.WriteString(whereClause)
-			args = append(args, whereArgs...)
-		}
+	if q == nil {
+		// To simplify logic, a nil query is equivalent to an empty query.
+		q = &Query{}
 	}
 
-	if q != nil && len(q.OrderBy) > 0 {
-		var orderClauses []string
-		for _, o := range q.OrderBy {
-			if o.Direction != OrderAsc && o.Direction != OrderDesc {
-				return nil, fmt.Errorf("invalid order direction: %s", o.Direction)
-			}
-			// We can't use a parameter for the column name in ORDER BY.
-			// The key column is safe. JSON paths are also safe when used with json_extract.
-			if o.Key == "key" {
-				orderClauses = append(orderClauses, fmt.Sprintf("key %s", o.Direction))
-			} else {
-				if strings.ContainsAny(o.Key, ";)") {
-					return nil, fmt.Errorf("invalid character in order by key: %s", o.Key)
-				}
-				orderClauses = append(orderClauses, fmt.Sprintf("json_extract(json, ?) %s", o.Direction))
-				args = append(args, "$."+o.Key)
-			}
-		}
-		queryBuilder.WriteString(" ORDER BY ")
-		queryBuilder.WriteString(strings.Join(orderClauses, ", "))
-	}
-
-	if q != nil && q.Limit > 0 {
-		queryBuilder.WriteString(" LIMIT ?")
-		args = append(args, q.Limit)
+	querySQL, args, err := q.build(s.tableName)
+	if err != nil {
+		return nil, fmt.Errorf("building query: %w", err)
 	}
 
 	var rows *sql.Rows
 	var queryErr error
 
 	if tx, ok := GetTx(ctx); ok {
-		rows, queryErr = tx.QueryContext(ctx, queryBuilder.String(), args...)
+		rows, queryErr = tx.QueryContext(ctx, querySQL, args...)
 	} else {
-		rows, queryErr = s.db.QueryContext(ctx, queryBuilder.String(), args...)
+		rows, queryErr = s.db.QueryContext(ctx, querySQL, args...)
 	}
 
 	if queryErr != nil {
@@ -295,53 +261,6 @@ func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], err
 	return seq, nil
 }
 
-// buildWhereClause recursively walks the predicate tree to build the SQL query.
-func (s *Store[T]) buildWhereClause(p Predicate) (string, []any, error) {
-	switch v := p.(type) {
-	case Filter:
-		switch v.Op {
-		case OpEq, OpNEq, OpGT, OpGTE, OpLT, OpLTE:
-			// Valid operator
-		default:
-			return "", nil, fmt.Errorf("unsupported query operator: %s", v.Op)
-		}
-		sql := fmt.Sprintf("json_extract(json, ?) %s ?", v.Op)
-		args := []any{"$." + v.Key, v.Value}
-		return sql, args, nil
-
-	case CustomPredicate:
-		return v.Clause, v.Args, nil
-
-	case And:
-		return s.joinPredicates(v.Predicates, "AND")
-
-	case Or:
-		return s.joinPredicates(v.Predicates, "OR")
-
-	default:
-		return "", nil, fmt.Errorf("unknown predicate type: %T", p)
-	}
-}
-
-func (s *Store[T]) joinPredicates(preds []Predicate, joiner string) (string, []any, error) {
-	if len(preds) == 0 {
-		return "", nil, nil
-	}
-
-	var clauses []string
-	var allArgs []any
-
-	for _, pred := range preds {
-		clause, args, err := s.buildWhereClause(pred)
-		if err != nil {
-			return "", nil, err
-		}
-		clauses = append(clauses, clause)
-		allArgs = append(allArgs, args...)
-	}
-
-	return fmt.Sprintf("(%s)", strings.Join(clauses, ") "+joiner+" (")), allArgs, nil
-}
 
 func (s *Store[T]) init(ctx context.Context) error {
 	query := fmt.Sprintf(`
