@@ -10,7 +10,7 @@
 *   **Simple API**: A minimal and opinionated API for common CRUD operations.
 *   **Flexible Querying**: Build complex queries using a simple and composable predicate system.
 *   **Transactional Support**: Execute multiple operations in a single, atomic transaction.
-*   **Zero-Dependency**: The entire database is a single file on disk, making it perfect for simple applications, command-line tools, and prototypes.
+*   **Self-Contained**: The entire database is a single file on disk (thanks to SQLite), making it perfect for simple applications, command-line tools, and prototypes.
 
 ## Getting Started
 
@@ -32,7 +32,7 @@ import (
 	"log"
 
 	"github.com/dir01/litestore"
-	"_github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
 
 // User represents a user in our system.
@@ -75,6 +75,12 @@ func main() {
 		log.Fatalf("failed to get user by email: %v", err)
 	}
 	fmt.Printf("Retrieved user: %s (%s)\n", retrievedUser.Name, retrievedUser.Email)
+
+	// --- Delete the user ---
+	if err := userStore.Delete(ctx, retrievedUser.ID); err != nil {
+		log.Fatalf("failed to delete user: %v", err)
+	}
+	fmt.Println("User deleted successfully.")
 }
 ```
 
@@ -99,6 +105,25 @@ litestore.AndPredicates(
 	litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "Alice"},
 	litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
 )
+```
+
+### Iterating over Results
+
+You can iterate over the results of a query using the `Iter` method. It returns a Go 1.22 `iter.Seq2` iterator. A `nil` query can be used to iterate over all entities.
+
+```go
+// Iterate over all users
+seq, err := userStore.Iter(ctx, nil)
+if err != nil {
+	log.Fatalf("failed to create iterator: %v", err)
+}
+
+for user, err := range seq {
+	if err != nil {
+		log.Fatalf("iteration failed: %v", err)
+	}
+	fmt.Printf("Found user: %s\n", user.Name)
+}
 ```
 
 ### Ordering and Limiting
