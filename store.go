@@ -4,27 +4,28 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"iter"
 	"reflect"
 	"regexp"
 	"strings"
 
-	"github.comcom/google/uuid"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var validTableNameRe = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // Store provides a key-value store for a specific entity type `T`.
-// `T` must be a struct with a field tagged with `litestore:"id"`.
+// `T` must be a struct. If it has a field tagged with `litestore:"id"`,
+// that field is used as the primary key.
 type Store[T any] struct {
 	db        *sql.DB
 	tableName string
 
 	// idField holds information about the `litestore:"id"` tagged field.
-	idField reflect.StructField
+	// It is nil if no such field is present.
+	idField *reflect.StructField
 
 	// Prepared statements
 	saveStmt   *sql.Stmt
@@ -32,9 +33,9 @@ type Store[T any] struct {
 }
 
 // NewStore creates a new Store instance for a given table name.
-// The generic type `T` must be a struct, and it must contain a string field
-// with the struct tag `litestore:"id"`. This field will be used as the
-// primary key for storing the entity.
+// The generic type `T` must be a struct. If it contains a string field
+// with the struct tag `litestore:"id"`, this field will be used as the
+// primary key. If the tag is omitted, IDs are generated automatically on Save.
 func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[T], error) {
 	if !validTableNameRe.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
@@ -46,22 +47,17 @@ func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[
 		return nil, fmt.Errorf("type T must be a struct, but got %s", typ.Kind())
 	}
 
-	var idField reflect.StructField
-	found := false
+	var idField *reflect.StructField
 	for i := range typ.NumField() {
 		field := typ.Field(i)
 		if tag := field.Tag.Get("litestore"); tag == "id" {
 			if field.Type.Kind() != reflect.String {
 				return nil, fmt.Errorf("field with litestore:\"id\" tag must be a string, but field %s is %s", field.Name, field.Type.Kind())
 			}
-			idField = field
-			found = true
+			f := field
+			idField = &f
 			break
 		}
-	}
-
-	if !found {
-		return nil, errors.New("type T must have a struct field with the tag `litestore:\"id\"`")
 	}
 
 	store := &Store[T]{
@@ -98,25 +94,37 @@ func (s *Store[T]) Close() error {
 }
 
 // Save stores an entity in the database.
-// It takes a pointer to the entity to allow setting the ID if it's empty.
-// If the entity's ID field is empty, a new UUID will be generated and set.
-// If an entity with the same ID already exists, it will be overwritten.
+// It takes a pointer to the entity to allow setting the ID if a tagged field is present.
+// If the entity has a `litestore:"id"` field, Save acts as an "upsert":
+// - If the ID field is empty, a new UUID is generated and set on the struct.
+// - The entity is saved using the value of the ID field as the key.
+// If the entity has no `litestore:"id"` field, a new UUID is generated for each
+// Save call, effectively always inserting a new record. The generated ID is not
+// set on the struct.
 func (s *Store[T]) Save(ctx context.Context, entity *T) error {
 	stmt := s.saveStmt
 	if tx, ok := GetTx(ctx); ok {
 		stmt = tx.StmtContext(ctx, stmt)
 	}
 
-	entityValue := reflect.ValueOf(entity).Elem()
-	idFieldValue := entityValue.FieldByIndex(s.idField.Index)
+	var id string
 
-	id := idFieldValue.String()
-	if id == "" {
-		id = uuid.NewString()
-		if !idFieldValue.CanSet() {
-			return fmt.Errorf("cannot set ID on unexported field %s", s.idField.Name)
+	if s.idField != nil {
+		// An ID field is present on the struct.
+		entityValue := reflect.ValueOf(entity).Elem()
+		idFieldValue := entityValue.FieldByIndex(s.idField.Index)
+
+		id = idFieldValue.String()
+		if id == "" {
+			id = uuid.NewString()
+			if !idFieldValue.CanSet() {
+				return fmt.Errorf("cannot set ID on unexported field %s", s.idField.Name)
+			}
+			idFieldValue.SetString(id)
 		}
-		idFieldValue.SetString(id)
+	} else {
+		// No ID field, so we always generate a new ID for insertion.
+		id = uuid.NewString()
 	}
 
 	dataBytes, err := json.Marshal(entity)
