@@ -19,7 +19,11 @@ func TestStore_Transactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
-		defer s.Close()
+		defer func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("failed to close store: %v", err)
+			}
+		}()
 
 		entity := &TestEntity{Name: "tx-commit"}
 		ctxNoTx := context.Background()
@@ -72,7 +76,11 @@ func TestStore_Transactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
-		defer s.Close()
+		defer func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("failed to close store: %v", err)
+			}
+		}()
 
 		entity := &TestEntity{Name: "tx-rollback"}
 		ctxNoTx := context.Background()
@@ -107,7 +115,11 @@ func TestStore_Transactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
-		defer s.Close()
+		defer func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("failed to close store: %v", err)
+			}
+		}()
 
 		entity := &TestEntity{Name: "tx-delete-commit"}
 		ctxNoTx := context.Background()
@@ -157,7 +169,11 @@ func TestStore_Transactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
-		defer s.Close()
+		defer func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("failed to close store: %v", err)
+			}
+		}()
 
 		entity := &TestEntity{Name: "tx-delete-rollback"}
 		ctxNoTx := context.Background()
@@ -195,7 +211,11 @@ func TestStore_Transactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
-		defer s.Close()
+		defer func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("failed to close store: %v", err)
+			}
+		}()
 
 		ctxNoTx := context.Background()
 		e1 := &TestEntity{Name: "iter-tx-1"}
@@ -208,7 +228,11 @@ func TestStore_Transactions(t *testing.T) {
 			t.Fatalf("failed to start transaction: %s", err.Error())
 		}
 		ctxWithTx := litestore.InjectTx(ctxNoTx, tx)
-		defer tx.Rollback() // Ensure rollback happens even on test failure
+		defer func() {
+			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+				t.Logf("failed to rollback tx: %v", err)
+			}
+		}() // Ensure rollback happens even on test failure
 
 		// Add a new one and delete the old one
 		e2 := &TestEntity{Name: "iter-tx-2"}

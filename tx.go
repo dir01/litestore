@@ -31,7 +31,12 @@ func WithTransaction(ctx context.Context, db *sql.DB, fn func(ctx context.Contex
 	}
 
 	// Defer a rollback. It will be a no-op if the transaction is committed.
-	defer tx.Rollback()
+	defer func() {
+		// The error is ignored here because we only care about the error from
+		// the user's function or from the commit. If the rollback fails, it's
+		// likely because the transaction was already committed, which is fine.
+		_ = tx.Rollback()
+	}()
 
 	// Create a new context with the transaction.
 	txCtx := InjectTx(ctx, tx)

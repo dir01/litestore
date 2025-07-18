@@ -29,7 +29,11 @@ func TestGetAndInjectTx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to begin transaction: %v", err)
 	}
-	defer dbtx.Rollback() // Rollback in case test fails before commit
+	defer func() {
+		if err := dbtx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			t.Logf("failed to rollback tx: %v", err)
+		}
+	}() // Rollback in case test fails before commit
 
 	txCtx := litestore.InjectTx(ctx, dbtx)
 	retrievedTx, ok := litestore.GetTx(txCtx)

@@ -228,7 +228,9 @@ func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], err
 	}
 
 	seq := func(yield func(T, error) bool) {
-		defer rows.Close()
+		defer func() {
+			_ = rows.Close()
+		}()
 		var zero T
 
 		for rows.Next() {

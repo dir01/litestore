@@ -29,14 +29,22 @@ func Example() {
 	// For this example, we'll create a temporary database file.
 	// In a real application, you would provide a path to a persistent file.
 	dbFile := "example.db"
-	defer os.Remove(dbFile)
+	defer func() {
+		if err := os.Remove(dbFile); err != nil {
+			log.Printf("failed to remove db file: %v", err)
+		}
+	}()
 
 	// Open the SQLite database.
 	db, err := sql.Open("sqlite3", dbFile)
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("failed to close db: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -46,7 +54,11 @@ func Example() {
 	if err != nil {
 		log.Fatalf("failed to create user store: %v", err)
 	}
-	defer userStore.Close()
+	defer func() {
+		if err := userStore.Close(); err != nil {
+			log.Printf("failed to close user store: %v", err)
+		}
+	}()
 
 	// Create a store for LoginEvent entities.
 	// We'll use a separate table for these.
@@ -54,7 +66,11 @@ func Example() {
 	if err != nil {
 		log.Fatalf("failed to create event store: %v", err)
 	}
-	defer eventStore.Close()
+	defer func() {
+		if err := eventStore.Close(); err != nil {
+			log.Printf("failed to close event store: %v", err)
+		}
+	}()
 
 	// --- Create a new user ---
 	newUser := &User{

@@ -3,7 +3,6 @@ package litestore_test
 import (
 	"database/sql"
 	"fmt"
-	"sync/atomic"
 	"testing"
 )
 
@@ -24,11 +23,3 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 
 	return db, cleanup
 }
-
-// mkEntityID will return unique entity id
-func mkEntityID() string {
-	_entityIDCounter.Add(1)
-	return fmt.Sprintf("%d", _entityIDCounter.Load())
-}
-
-var _entityIDCounter atomic.Uint32

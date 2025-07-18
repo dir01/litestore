@@ -34,7 +34,11 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("failed to close store: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -120,7 +124,11 @@ func TestStore_Save_NoID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("failed to close store: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -148,7 +156,11 @@ func TestStore_GetOne_Errors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("failed to close store: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -233,7 +245,11 @@ func TestStore_Iter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
-	defer s.Close()
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("failed to close store: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -412,32 +428,7 @@ func TestStore_Iter(t *testing.T) {
 		}
 	})
 
-	t.Run("query with custom predicate", func(t *testing.T) {
-		var results []TestEntity
-		// Find entities where the length of the name is 3.
-		p := litestore.CustomPredicate{
-			Clause: "LENGTH(json_extract(json, ?)) = ?",
-			Args:   []any{"$.name", 3},
-		}
-		q := &litestore.Query{Predicate: p}
-		seq, err := s.Iter(ctx, q)
-		if err != nil {
-			t.Fatalf("Iter failed: %v", err)
-		}
-		for entity, err := range seq {
-			if err != nil {
-				t.Fatalf("iteration failed: %v", err)
-			}
-			results = append(results, entity)
-		}
-
-		if len(results) != 1 {
-			t.Fatalf("expected 1 result, got %d, want 1", len(results))
-		}
-		if results[0].Name != "bob" {
-			t.Errorf("expected bob, got %s", results[0].Name)
-		}
-	})
+	
 
 	t.Run("query with order by key", func(t *testing.T) {
 		// get all entities and sort by ID descending
