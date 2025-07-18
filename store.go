@@ -160,42 +160,34 @@ func (s *Store[T]) Delete(ctx context.Context, key string) error {
 // If multiple entities match, it returns the first one found.
 func (s *Store[T]) GetOne(ctx context.Context, p Predicate) (T, error) {
 	var zero T
-	var queryBuilder strings.Builder
-	args := []any{}
-
-	queryBuilder.WriteString(fmt.Sprintf("SELECT json FROM %s", s.tableName))
-
-	if p != nil {
-		whereClause, whereArgs, err := s.buildWhereClause(p)
-		if err != nil {
-			return zero, err
-		}
-		if whereClause != "" {
-			queryBuilder.WriteString(" WHERE ")
-			queryBuilder.WriteString(whereClause)
-			args = append(args, whereArgs...)
-		}
-	}
-	queryBuilder.WriteString(" LIMIT 1")
-
-	var row *sql.Row
-	if tx, ok := GetTx(ctx); ok {
-		row = tx.QueryRowContext(ctx, queryBuilder.String(), args...)
-	} else {
-		row = s.db.QueryRowContext(ctx, queryBuilder.String(), args...)
-	}
-
-	var jsonData []byte
-	if err := row.Scan(&jsonData); err != nil {
-		if err == sql.ErrNoRows {
-			return zero, fmt.Errorf("no entity found matching predicate: %w", err)
-		}
-		return zero, fmt.Errorf("querying single entity: %w", err)
+	seq, err := s.Iter(ctx, p)
+	if err != nil {
+		return zero, err
 	}
 
 	var result T
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		return zero, fmt.Errorf("unmarshaling entity: %w", err)
+	var iterErr error
+	found := false
+
+	// The `for range` over a Seq2 will call the underlying iterator function.
+	// The `break` will cause the `yield` function to return `false`,
+	// which will stop the `for rows.Next()` loop in `Iter`.
+	for entity, err := range seq {
+		if err != nil {
+			iterErr = err
+			break
+		}
+		result = entity
+		found = true
+		break // We only want the first one.
+	}
+
+	if iterErr != nil {
+		return zero, fmt.Errorf("iteration failed while getting one: %w", iterErr)
+	}
+
+	if !found {
+		return zero, fmt.Errorf("no entity found matching predicate: %w", sql.ErrNoRows)
 	}
 
 	return result, nil
