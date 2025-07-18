@@ -22,7 +22,7 @@ type RecordStore[T any] struct {
 
 // NewRecordStore creates a new RecordsStore instance for a given table and record type.
 // All records managed by this store will be of type T and stored with the given recordType.
-func NewRecordStore[T any](db *sql.DB, tableName string, recordType string) (*RecordStore[T], error) {
+func NewRecordStore[T any](ctx context.Context, db *sql.DB, tableName string, recordType string) (*RecordStore[T], error) {
 	if !validTableName.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
@@ -32,7 +32,6 @@ func NewRecordStore[T any](db *sql.DB, tableName string, recordType string) (*Re
 		recordType: recordType,
 	}
 
-	ctx := context.Background()
 	if err := store.init(ctx); err != nil {
 		return nil, err
 	}

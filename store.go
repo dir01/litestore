@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.comcom/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -33,9 +33,9 @@ type Store[T any] struct {
 
 // NewStore creates a new Store instance for a given table name.
 // The generic type `T` must be a struct, and it must contain a string field
-// with the struct tag `litestore:"id"`.
-// This field will be used as the primary key for storing the entity.
-func NewStore[T any](db *sql.DB, tableName string) (*Store[T], error) {
+// with the struct tag `litestore:"id"`. This field will be used as the
+// primary key for storing the entity.
+func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[T], error) {
 	if !validTableNameRe.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
@@ -70,7 +70,6 @@ func NewStore[T any](db *sql.DB, tableName string) (*Store[T], error) {
 		idField:   idField,
 	}
 
-	ctx := context.Background()
 	if err := store.init(ctx); err != nil {
 		return nil, err
 	}
