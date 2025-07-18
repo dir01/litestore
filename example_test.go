@@ -99,7 +99,7 @@ func Example() {
 	// --- Iterate over all login events for that user ---
 	fmt.Printf("Login events for user ID %s:\n", retrievedUser.ID)
 	eventFilter := litestore.Filter{Key: "user_id", Op: litestore.OpEq, Value: retrievedUser.ID}
-	eventSeq, err := eventStore.Iter(ctx, eventFilter)
+	eventSeq, err := eventStore.Iter(ctx, &litestore.Query{Predicate: eventFilter})
 	if err != nil {
 		log.Fatalf("failed to create iterator for events: %v", err)
 	}
