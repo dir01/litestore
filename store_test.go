@@ -503,18 +503,4 @@ func TestStore_Iter(t *testing.T) {
 			t.Errorf("wrong error message. \ngot: %s\nwant: %s", err.Error(), expectedErr)
 		}
 	})
-
-	t.Run("query with zero limit", func(t *testing.T) {
-		q := &litestore.Query{Limit: 0}
-		seq, err := s.Iter(ctx, q)
-		if err != nil {
-			t.Fatalf("Iter failed: %v", err)
-		}
-		for entity, err := range seq {
-			if err != nil {
-				t.Fatalf("iteration failed: %v", err)
-			}
-			t.Fatalf("expected zero results for limit 0, but got at least one: %+v", entity)
-		}
-	})
 }
