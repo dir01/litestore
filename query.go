@@ -30,14 +30,14 @@ type OrderBy struct {
 
 // build constructs the SQL query string and arguments.
 // It assumes q is not nil.
-func (q *Query) build(tableName string) (string, []any, error) {
+func (q *Query) build(tableName string, validKeys map[string]struct{}) (string, []any, error) {
 	var queryBuilder strings.Builder
 	args := []any{}
 
 	queryBuilder.WriteString(fmt.Sprintf("SELECT key, json FROM %s", tableName))
 
 	if q.Predicate != nil {
-		whereClause, whereArgs, err := buildWhereClause(q.Predicate)
+		whereClause, whereArgs, err := buildWhereClause(q.Predicate, validKeys)
 		if err != nil {
 			return "", nil, err
 		}
@@ -59,6 +59,12 @@ func (q *Query) build(tableName string) (string, []any, error) {
 			if o.Key == "key" {
 				orderClauses = append(orderClauses, fmt.Sprintf("key %s", o.Direction))
 			} else {
+				// Only validate top-level keys. Nested keys (e.g. 'a.b') are not validated.
+				if !strings.Contains(o.Key, ".") {
+					if _, ok := validKeys[o.Key]; !ok {
+						return "", nil, fmt.Errorf("invalid order by key: '%s' is not a valid key for this entity", o.Key)
+					}
+				}
 				if strings.ContainsAny(o.Key, ";)") {
 					return "", nil, fmt.Errorf("invalid character in order by key: %s", o.Key)
 				}
@@ -133,7 +139,7 @@ func OrPredicates(preds ...Predicate) Or {
 }
 
 // buildWhereClause recursively walks the predicate tree to build the SQL query.
-func buildWhereClause(p Predicate) (string, []any, error) {
+func buildWhereClause(p Predicate, validKeys map[string]struct{}) (string, []any, error) {
 	switch v := p.(type) {
 	case Filter:
 		switch v.Op {
@@ -142,22 +148,35 @@ func buildWhereClause(p Predicate) (string, []any, error) {
 		default:
 			return "", nil, fmt.Errorf("unsupported query operator: %s", v.Op)
 		}
+
+		if v.Key == "key" {
+			sql := fmt.Sprintf("key %s ?", v.Op)
+			return sql, []any{v.Value}, nil
+		}
+
+		// Only validate top-level keys. Nested keys (e.g. 'a.b') are not validated.
+		if !strings.Contains(v.Key, ".") {
+			if _, ok := validKeys[v.Key]; !ok {
+				return "", nil, fmt.Errorf("invalid filter key: '%s' is not a valid key for this entity", v.Key)
+			}
+		}
+
 		sql := fmt.Sprintf("json_extract(json, ?) %s ?", v.Op)
 		args := []any{"$." + v.Key, v.Value}
 		return sql, args, nil
 
 	case And:
-		return joinPredicates(v.Predicates, "AND")
+		return joinPredicates(v.Predicates, "AND", validKeys)
 
 	case Or:
-		return joinPredicates(v.Predicates, "OR")
+		return joinPredicates(v.Predicates, "OR", validKeys)
 
 	default:
 		return "", nil, fmt.Errorf("unknown predicate type: %T", p)
 	}
 }
 
-func joinPredicates(preds []Predicate, joiner string) (string, []any, error) {
+func joinPredicates(preds []Predicate, joiner string, validKeys map[string]struct{}) (string, []any, error) {
 	if len(preds) == 0 {
 		return "", nil, nil
 	}
@@ -166,7 +185,7 @@ func joinPredicates(preds []Predicate, joiner string) (string, []any, error) {
 	var allArgs []any
 
 	for _, pred := range preds {
-		clause, args, err := buildWhereClause(pred)
+		clause, args, err := buildWhereClause(pred, validKeys)
 		if err != nil {
 			return "", nil, err
 		}

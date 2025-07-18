@@ -27,6 +27,9 @@ type Store[T any] struct {
 	// It is nil if no such field is present.
 	idField *reflect.StructField
 
+	// validJSONKeys holds the set of JSON keys for type T.
+	validJSONKeys map[string]struct{}
+
 	// Prepared statements
 	saveStmt   *sql.Stmt
 	deleteStmt *sql.Stmt
@@ -48,22 +51,35 @@ func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[
 	}
 
 	var idField *reflect.StructField
+	validJSONKeys := make(map[string]struct{})
+
 	for i := range typ.NumField() {
 		field := typ.Field(i)
+
 		if tag := field.Tag.Get("litestore"); tag == "id" {
 			if field.Type.Kind() != reflect.String {
 				return nil, fmt.Errorf("field with litestore:\"id\" tag must be a string, but field %s is %s", field.Name, field.Type.Kind())
 			}
 			f := field
 			idField = &f
-			break
 		}
+
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+		jsonName, _, _ := strings.Cut(jsonTag, ",")
+		if jsonName == "" {
+			jsonName = field.Name
+		}
+		validJSONKeys[jsonName] = struct{}{}
 	}
 
 	store := &Store[T]{
-		db:        db,
-		tableName: tableName,
-		idField:   idField,
+		db:            db,
+		tableName:     tableName,
+		idField:       idField,
+		validJSONKeys: validJSONKeys,
 	}
 
 	if err := store.init(ctx); err != nil {
@@ -209,7 +225,7 @@ func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], err
 		q = &Query{}
 	}
 
-	querySQL, args, err := q.build(s.tableName)
+	querySQL, args, err := q.build(s.tableName, s.validJSONKeys)
 	if err != nil {
 		return nil, fmt.Errorf("building query: %w", err)
 	}
