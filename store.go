@@ -15,7 +15,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+var validTableNameRe = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // Store provides a key-value store for a specific entity type `T`.
 // `T` must be a struct with a field tagged with `litestore:"id"`.
@@ -33,10 +33,10 @@ type Store[T any] struct {
 
 // NewStore creates a new Store instance for a given table name.
 // The generic type `T` must be a struct, and it must contain a string field
-// with the struct tag `litestore:"id"`. This field will be used as the
-// primary key for storing the entity.
+// with the struct tag `litestore:"id"`.
+// This field will be used as the primary key for storing the entity.
 func NewStore[T any](db *sql.DB, tableName string) (*Store[T], error) {
-	if !validTableName.MatchString(tableName) {
+	if !validTableNameRe.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
 
@@ -48,7 +48,7 @@ func NewStore[T any](db *sql.DB, tableName string) (*Store[T], error) {
 
 	var idField reflect.StructField
 	found := false
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		field := typ.Field(i)
 		if tag := field.Tag.Get("litestore"); tag == "id" {
 			if field.Type.Kind() != reflect.String {

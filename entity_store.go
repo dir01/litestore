@@ -23,8 +23,9 @@ type Pair[T any] struct {
 
 // EntityStore provides a key-value store for a specific entity type, backed by a dedicated SQLite table.
 type EntityStore[T any] struct {
-	db        *sql.DB
-	tableName string
+	db         *sql.DB
+	tableName  string
+	recordType string
 
 	// Prepared statements
 	getStmt          *sql.Stmt
@@ -35,7 +36,7 @@ type EntityStore[T any] struct {
 
 // NewEntityStore creates a new EntityStore instance for a given table name.
 // The table name must be a valid SQL identifier.
-func NewEntityStore[T any](db *sql.DB, tableName string) (*EntityStore[T], error) {
+func NewEntityStore[T any](db *sql.DB, tableName string, recordType string) (*EntityStore[T], error) {
 	if !validTableName.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
@@ -304,8 +305,10 @@ func (e *EntityStore[T]) joinPredicates(preds []Predicate, joiner string) (strin
 func (e *EntityStore[T]) init(ctx context.Context) error {
 	query := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
-			key TEXT PRIMARY KEY,
-			json TEXT NOT NULL
+			key TEXT NOT NULL,
+			record_type TEXT NOT NULL,
+			json TEXT NOT NULL,
+			PRIMARY KEY (key, record_type)
 		)`, e.tableName)
 	_, err := e.db.ExecContext(ctx, query)
 	if err != nil {
@@ -317,15 +320,15 @@ func (e *EntityStore[T]) init(ctx context.Context) error {
 
 func (e *EntityStore[T]) prepareStatements(ctx context.Context) (err error) {
 	// Prepare Get
-	queryGet := fmt.Sprintf("SELECT json FROM %s WHERE key = ?", e.tableName)
+	queryGet := fmt.Sprintf("SELECT json FROM %s WHERE record_type = ? and key = ?", e.tableName)
 	if e.getStmt, err = e.db.PrepareContext(ctx, queryGet); err != nil {
 		return fmt.Errorf("preparing get statement: %w", err)
 	}
 
 	// Prepare Set
 	querySet := fmt.Sprintf(`
-		INSERT INTO %s (key, json)
-		VALUES (?, ?)
+		INSERT INTO %s (key, record_type, json)
+		VALUES (?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET
 			json = excluded.json
 	`, e.tableName)
