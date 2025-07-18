@@ -103,6 +103,13 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 			t.Fatalf("expected sql.ErrNoRows after deletion, got %v", err)
 		}
 	})
+
+	t.Run("delete non-existent entity", func(t *testing.T) {
+		// Deleting a key that does not exist should not return an error.
+		if err := s.Delete(ctx, "non-existent-id"); err != nil {
+			t.Fatalf("expected no error when deleting non-existent entity, got %v", err)
+		}
+	})
 }
 
 func TestStore_Save_NoID(t *testing.T) {
@@ -171,6 +178,49 @@ func TestStore_GetOne_Errors(t *testing.T) {
 		expectedErr := "expected one result, but found multiple"
 		if err.Error() != expectedErr {
 			t.Fatalf("expected error message '%s', got '%s'", expectedErr, err.Error())
+		}
+	})
+}
+
+func TestNewStore_Errors(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	t.Run("invalid table name", func(t *testing.T) {
+		_, err := litestore.NewStore[TestEntity](ctx, db, "invalid-name")
+		if err == nil {
+			t.Fatal("expected an error for invalid table name, got nil")
+		}
+		expectedErr := "invalid table name: invalid-name"
+		if err.Error() != expectedErr {
+			t.Fatalf("expected error '%s', got '%s'", expectedErr, err.Error())
+		}
+	})
+
+	t.Run("non-struct type", func(t *testing.T) {
+		_, err := litestore.NewStore[int](ctx, db, "some_table")
+		if err == nil {
+			t.Fatal("expected an error for non-struct type, got nil")
+		}
+		expectedErr := "type T must be a struct, but got int"
+		if err.Error() != expectedErr {
+			t.Fatalf("expected error '%s', got '%s'", expectedErr, err.Error())
+		}
+	})
+
+	t.Run("non-string id field", func(t *testing.T) {
+		type BadEntity struct {
+			ID int `litestore:"id"`
+		}
+		_, err := litestore.NewStore[BadEntity](ctx, db, "some_table")
+		if err == nil {
+			t.Fatal("expected an error for non-string id field, got nil")
+		}
+		expectedErr := "field with litestore:\"id\" tag must be a string, but field ID is int"
+		if err.Error() != expectedErr {
+			t.Fatalf("expected error '%s', got '%s'", expectedErr, err.Error())
 		}
 	})
 }
@@ -386,6 +436,85 @@ func TestStore_Iter(t *testing.T) {
 		}
 		if results[0].Name != "bob" {
 			t.Errorf("expected bob, got %s", results[0].Name)
+		}
+	})
+
+	t.Run("query with order by key", func(t *testing.T) {
+		// get all entities and sort by ID descending
+		var ids []string
+		for _, e := range savedEntities {
+			ids = append(ids, e.ID)
+		}
+		sort.Strings(ids)
+		// expected order is descending
+		wantOrder := []string{ids[3], ids[2], ids[1], ids[0]}
+
+		q := &litestore.Query{
+			OrderBy: []litestore.OrderBy{
+				{Key: "key", Direction: litestore.OrderDesc},
+			},
+		}
+		seq, err := s.Iter(ctx, q)
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		var gotOrder []string
+		for entity, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			gotOrder = append(gotOrder, entity.ID)
+		}
+
+		if !reflect.DeepEqual(gotOrder, wantOrder) {
+			t.Errorf("incorrect order. got: %v, want: %v", gotOrder, wantOrder)
+		}
+	})
+
+	t.Run("query with invalid order by key", func(t *testing.T) {
+		q := &litestore.Query{
+			OrderBy: []litestore.OrderBy{
+				{Key: "name;--", Direction: litestore.OrderAsc},
+			},
+		}
+		_, err := s.Iter(ctx, q)
+		if err == nil {
+			t.Fatal("expected error for invalid order by key, but got nil")
+		}
+		expectedErr := "building query: invalid character in order by key: name;--"
+		if err.Error() != expectedErr {
+			t.Errorf("wrong error message. \ngot: %s\nwant: %s", err.Error(), expectedErr)
+		}
+	})
+
+	t.Run("query with invalid order direction", func(t *testing.T) {
+		q := &litestore.Query{
+			OrderBy: []litestore.OrderBy{
+				{Key: "name", Direction: "INVALID"},
+			},
+		}
+		_, err := s.Iter(ctx, q)
+		if err == nil {
+			t.Fatal("expected error for invalid order direction, but got nil")
+		}
+		expectedErr := "building query: invalid order direction: INVALID"
+		if err.Error() != expectedErr {
+			t.Errorf("wrong error message. \ngot: %s\nwant: %s", err.Error(), expectedErr)
+		}
+	})
+
+	t.Run("query with zero limit", func(t *testing.T) {
+		q := &litestore.Query{Limit: 0}
+		seq, err := s.Iter(ctx, q)
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+		for entity, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			t.Fatalf("expected zero results for limit 0, but got at least one: %+v", entity)
 		}
 	})
 }
