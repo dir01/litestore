@@ -59,14 +59,14 @@ func (q *Query) build(tableName string, validKeys map[string]struct{}) (string, 
 			if o.Key == "key" {
 				orderClauses = append(orderClauses, fmt.Sprintf("key %s", o.Direction))
 			} else {
+				if strings.ContainsAny(o.Key, ";)") {
+					return "", nil, fmt.Errorf("invalid character in order by key: %s", o.Key)
+				}
 				// Only validate top-level keys. Nested keys (e.g. 'a.b') are not validated.
 				if !strings.Contains(o.Key, ".") {
 					if _, ok := validKeys[o.Key]; !ok {
 						return "", nil, fmt.Errorf("invalid order by key: '%s' is not a valid key for this entity", o.Key)
 					}
-				}
-				if strings.ContainsAny(o.Key, ";)") {
-					return "", nil, fmt.Errorf("invalid character in order by key: %s", o.Key)
 				}
 				orderClauses = append(orderClauses, fmt.Sprintf("json_extract(json, ?) %s", o.Direction))
 				args = append(args, "$."+o.Key)
