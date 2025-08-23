@@ -17,15 +17,15 @@ import (
 var validTableNameRe = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // Store provides a key-value store for a specific entity type `T`.
-// `T` must be a struct. If it has a field tagged with `litestore:"id"`,
+// `T` must be a struct. If it has a field tagged with `litestore:"key"`,
 // that field is used as the primary key.
 type Store[T any] struct {
 	db        *sql.DB
 	tableName string
 
-	// idField holds information about the `litestore:"id"` tagged field.
+	// keyField holds information about the `litestore:"key"` tagged field.
 	// It is nil if no such field is present.
-	idField *reflect.StructField
+	keyField *reflect.StructField
 
 	// validJSONKeys holds the set of JSON keys for type T.
 	validJSONKeys map[string]struct{}
@@ -37,8 +37,8 @@ type Store[T any] struct {
 
 // NewStore creates a new Store instance for a given table name.
 // The generic type `T` must be a struct. If it contains a string field
-// with the struct tag `litestore:"id"`, this field will be used as the
-// primary key. If the tag is omitted, IDs are generated automatically on Save.
+// with the struct tag `litestore:"key"`, this field will be used as the
+// primary key. If the tag is omitted, key will be generated automatically on Save.
 func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[T], error) {
 	if !validTableNameRe.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
@@ -50,18 +50,18 @@ func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[
 		return nil, fmt.Errorf("type T must be a struct, but got %s", typ.Kind())
 	}
 
-	var idField *reflect.StructField
+	var keyField *reflect.StructField
 	validJSONKeys := make(map[string]struct{})
 
 	for i := range typ.NumField() {
 		field := typ.Field(i)
 
-		if tag := field.Tag.Get("litestore"); tag == "id" {
+		if tag := field.Tag.Get("litestore"); tag == "key" {
 			if field.Type.Kind() != reflect.String {
-				return nil, fmt.Errorf("field with litestore:\"id\" tag must be a string, but field %s is %s", field.Name, field.Type.Kind())
+				return nil, fmt.Errorf("field with litestore:\"key\" tag must be a string, but field %s is %s", field.Name, field.Type.Kind())
 			}
 			f := field
-			idField = &f
+			keyField = &f
 		}
 
 		jsonTag := field.Tag.Get("json")
@@ -78,7 +78,7 @@ func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[
 	store := &Store[T]{
 		db:            db,
 		tableName:     tableName,
-		idField:       idField,
+		keyField:      keyField,
 		validJSONKeys: validJSONKeys,
 	}
 
@@ -110,11 +110,11 @@ func (s *Store[T]) Close() error {
 }
 
 // Save stores an entity in the database.
-// It takes a pointer to the entity to allow setting the ID if a tagged field is present.
-// If the entity has a `litestore:"id"` field, Save acts as an "upsert":
-// - If the ID field is empty, a new UUID is generated and set on the struct.
-// - The entity is saved using the value of the ID field as the key.
-// If the entity has no `litestore:"id"` field, a new UUID is generated for each
+// It takes a pointer to the entity to allow setting the key if a tagged field is present.
+// If the entity has a `litestore:"key"` field, Save acts as an "upsert":
+// - If the key field is empty, a new UUID is generated and set on the struct.
+// - The entity is saved using the value of the key field as the key.
+// If the entity has no `litestore:"key"` field, a new UUID is generated for each
 // Save call, effectively always inserting a new record. The generated ID is not
 // set on the struct.
 func (s *Store[T]) Save(ctx context.Context, entity *T) error {
@@ -123,24 +123,24 @@ func (s *Store[T]) Save(ctx context.Context, entity *T) error {
 		stmt = tx.StmtContext(ctx, stmt)
 	}
 
-	var id string
+	var key string
 
-	if s.idField != nil {
-		// An ID field is present on the struct.
+	if s.keyField != nil {
+		// A key field is present on the struct.
 		entityValue := reflect.ValueOf(entity).Elem()
-		idFieldValue := entityValue.FieldByIndex(s.idField.Index)
+		keyFieldValue := entityValue.FieldByIndex(s.keyField.Index)
 
-		id = idFieldValue.String()
-		if id == "" {
-			id = uuid.NewString()
-			if !idFieldValue.CanSet() {
-				return fmt.Errorf("cannot set ID on unexported field %s", s.idField.Name)
+		key = keyFieldValue.String()
+		if key == "" {
+			key = uuid.NewString()
+			if !keyFieldValue.CanSet() {
+				return fmt.Errorf("cannot set key on unexported field %s", s.keyField.Name)
 			}
-			idFieldValue.SetString(id)
+			keyFieldValue.SetString(key)
 		}
 	} else {
-		// No ID field, so we always generate a new ID for insertion.
-		id = uuid.NewString()
+		// No key field, so we always generate a new ID for insertion.
+		key = uuid.NewString()
 	}
 
 	dataBytes, err := json.Marshal(entity)
@@ -148,9 +148,9 @@ func (s *Store[T]) Save(ctx context.Context, entity *T) error {
 		return fmt.Errorf("failed to marshal entity: %w", err)
 	}
 
-	_, err = stmt.ExecContext(ctx, id, dataBytes)
+	_, err = stmt.ExecContext(ctx, key, dataBytes)
 	if err != nil {
-		return fmt.Errorf("saving entity with id %s: %w", id, err)
+		return fmt.Errorf("saving entity with id %s: %w", key, err)
 	}
 
 	return nil
@@ -278,7 +278,6 @@ func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], err
 
 	return seq, nil
 }
-
 
 func (s *Store[T]) init(ctx context.Context) error {
 	query := fmt.Sprintf(`

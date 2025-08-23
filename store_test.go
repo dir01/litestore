@@ -11,17 +11,17 @@ import (
 	"github.com/dir01/litestore"
 )
 
-// TestEntity has an ID field.
+// TestEntity has a key field.
 type TestEntity struct {
-	ID       string `litestore:"id"`
+	ID       string `litestore:"key"`
 	Name     string `json:"name"`
 	Category string `json:"category"`
 	IsActive bool   `json:"is_active"`
 	Value    int    `json:"value"`
 }
 
-// TestEntityNoID does not have an ID field.
-type TestEntityNoID struct {
+// TestEntityNoKey does not have a key field.
+type TestEntityNoKey struct {
 	Info string `json:"info"`
 	Data int    `json:"data"`
 }
@@ -120,7 +120,7 @@ func TestStore_Save_NoID(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestEntityNoID](context.Background(), db, "test_entities_no_id")
+	s, err := litestore.NewStore[TestEntityNoKey](context.Background(), db, "test_entities_no_key")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -132,9 +132,9 @@ func TestStore_Save_NoID(t *testing.T) {
 
 	ctx := context.Background()
 
-	entity := &TestEntityNoID{Info: "some info", Data: 123}
+	entity := &TestEntityNoKey{Info: "some info", Data: 123}
 	if err := s.Save(ctx, entity); err != nil {
-		t.Fatalf("failed to save entity with no ID field: %v", err)
+		t.Fatalf("failed to save entity with no key field: %v", err)
 	}
 
 	// We can't know the ID, but we can query for the content.
@@ -222,15 +222,15 @@ func TestNewStore_Errors(t *testing.T) {
 		}
 	})
 
-	t.Run("non-string id field", func(t *testing.T) {
+	t.Run("non-string key field", func(t *testing.T) {
 		type BadEntity struct {
-			ID int `litestore:"id"`
+			ID int `litestore:"key"`
 		}
 		_, err := litestore.NewStore[BadEntity](ctx, db, "some_table")
 		if err == nil {
-			t.Fatal("expected an error for non-string id field, got nil")
+			t.Fatal("expected an error for non-string key field, got nil")
 		}
-		expectedErr := "field with litestore:\"id\" tag must be a string, but field ID is int"
+		expectedErr := "field with litestore:\"key\" tag must be a string, but field ID is int"
 		if err.Error() != expectedErr {
 			t.Fatalf("expected error '%s', got '%s'", expectedErr, err.Error())
 		}

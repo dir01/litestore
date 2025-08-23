@@ -37,7 +37,7 @@ import (
 
 // User represents a user in our system.
 type User struct {
-	ID    string `litestore:"id"`
+	ID    string `litestore:"key"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }

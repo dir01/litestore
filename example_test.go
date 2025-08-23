@@ -12,7 +12,7 @@ import (
 
 // User represents a user in our system.
 type User struct {
-	ID    string `litestore:"id"`
+	ID    string `litestore:"key"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }
@@ -77,7 +77,7 @@ func Example() {
 		Name:  "Alice",
 		Email: "alice@example.com",
 	}
-	// The ID field is empty, so Save will generate a new UUID and set it.
+	// The key field is empty, so Save will generate a new UUID and set it.
 	if err := userStore.Save(ctx, newUser); err != nil {
 		log.Fatalf("failed to save user: %v", err)
 	}
