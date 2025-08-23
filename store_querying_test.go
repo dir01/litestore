@@ -1,7 +1,6 @@
 package litestore_test
 
 import (
-	"context"
 	"reflect"
 	"sort"
 	"testing"
@@ -13,7 +12,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities_iter")
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "test_entities_iter")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -23,7 +22,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup data
 	entitiesToSave := []*TestPersonWithKey{
@@ -37,7 +36,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 		if err := s.Save(ctx, e); err != nil {
 			t.Fatalf("failed to save entity: %v", err)
 		}
-		savedEntities[e.ID] = *e
+		savedEntities[e.K] = *e
 	}
 
 	compareResults := func(t *testing.T, got, want []TestPersonWithKey) {
@@ -48,8 +47,8 @@ func TestStore_Querying_Iter(t *testing.T) {
 			t.Logf("want: %+v", want)
 			return
 		}
-		sort.Slice(got, func(i, j int) bool { return got[i].ID < got[j].ID })
-		sort.Slice(want, func(i, j int) bool { return want[i].ID < want[j].ID })
+		sort.Slice(got, func(i, j int) bool { return got[i].K < got[j].K })
+		sort.Slice(want, func(i, j int) bool { return want[i].K < want[j].K })
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("results do not match.\ngot:  %+v\nwant: %+v", got, want)
 		}
@@ -145,7 +144,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("iteration failed: %v", err)
 			}
-			processedIDs = append(processedIDs, entity.ID)
+			processedIDs = append(processedIDs, entity.K)
 			if len(processedIDs) == 1 {
 				break
 			}
@@ -192,7 +191,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 		// get all entities and sort by ID descending
 		var ids []string
 		for _, e := range savedEntities {
-			ids = append(ids, e.ID)
+			ids = append(ids, e.K)
 		}
 		sort.Strings(ids)
 		// expected order is descending
@@ -213,7 +212,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("iteration failed: %v", err)
 			}
-			gotOrder = append(gotOrder, entity.ID)
+			gotOrder = append(gotOrder, entity.K)
 		}
 
 		if !reflect.DeepEqual(gotOrder, wantOrder) {
@@ -226,7 +225,7 @@ func TestStore_Querying_ErrorCases(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities_errors")
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "test_entities_errors")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -236,7 +235,7 @@ func TestStore_Querying_ErrorCases(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("query with invalid operator", func(t *testing.T) {
 		p := litestore.Filter{Key: "value", Op: "INVALID", Value: 10}
@@ -287,7 +286,7 @@ func TestStore_Querying_FilterOperators(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_filter_ops")
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "test_filter_ops")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -297,7 +296,7 @@ func TestStore_Querying_FilterOperators(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup test data
 	testEntities := []*TestPersonWithKey{
@@ -314,8 +313,8 @@ func TestStore_Querying_FilterOperators(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		filter       litestore.Filter
+		name          string
+		filter        litestore.Filter
 		expectedNames []string
 	}{
 		{
@@ -365,9 +364,10 @@ func TestStore_Querying_FilterOperators(t *testing.T) {
 			sort.Strings(tt.expectedNames)
 
 			if !reflect.DeepEqual(resultNames, tt.expectedNames) {
-				t.Errorf("filter %s: expected names %v, got %v", 
+				t.Errorf("filter %s: expected names %v, got %v",
 					tt.name, tt.expectedNames, resultNames)
 			}
 		})
 	}
 }
+

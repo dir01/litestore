@@ -1,7 +1,6 @@
 package litestore_test
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -12,7 +11,7 @@ func TestStore_WithoutKey_Save_GetOne(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestPersonNoKey](context.Background(), db, "test_entities_no_key")
+	s, err := litestore.NewStore[TestPersonNoKey](t.Context(), db, "test_entities_no_key")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -22,7 +21,7 @@ func TestStore_WithoutKey_Save_GetOne(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("save entity without key field", func(t *testing.T) {
 		entity := &TestPersonNoKey{Info: "some info", Data: 123}
@@ -126,4 +125,42 @@ func TestStore_WithoutKey_Save_GetOne(t *testing.T) {
 			}
 		}
 	})
+
+}
+
+func TestKeyMayBeAddedLater(t *testing.T) {
+
+	type StructNoKey struct {
+		Name string `json:"name"`
+	}
+	type StructWithKey struct {
+		SomeField string `json:"some_field" litestore:"key"`
+		Name      string `json:"name"`
+	}
+
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	storeNoKey, err := litestore.NewStore[StructNoKey](t.Context(), db, "test")
+	if err != nil {
+		t.Fatalf("failed to create new store: %v", err)
+	}
+	storeWithKey, err := litestore.NewStore[StructWithKey](t.Context(), db, "test")
+	if err != nil {
+		t.Fatalf("failed to create new store: %v", err)
+	}
+
+	err = storeNoKey.Save(t.Context(), &StructNoKey{Name: "foo"})
+	if err != nil {
+		t.Fatalf("failed to save entityNoKey to storeNoKey: %v", err)
+	}
+
+	entityWithKey, err := storeWithKey.GetOne(t.Context(), litestore.Filter{Key: "name", Op: litestore.OpEq, Value: "foo"})
+	if err != nil {
+		t.Fatalf("failed to get entityWithKey from a storeWithKey: %v", err)
+	}
+
+	if entityWithKey.SomeField == "" {
+		t.Fatal("expected entityWithKey to have key filled in")
+	}
 }

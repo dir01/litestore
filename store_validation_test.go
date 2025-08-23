@@ -1,7 +1,6 @@
 package litestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/dir01/litestore"
@@ -11,7 +10,7 @@ func TestNewStore_Validation_Errors(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("invalid table name", func(t *testing.T) {
 		_, err := litestore.NewStore[TestPersonWithKey](ctx, db, "invalid-name")
@@ -54,7 +53,7 @@ func TestNewStore_ValidTableNames(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	validTableNames := []string{
 		"users",
@@ -86,7 +85,7 @@ func TestNewStore_InvalidTableNames(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	invalidTableNames := []string{
 		"invalid-name",
@@ -117,7 +116,7 @@ func TestNewStore_KeyFieldValidation(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("valid string key field", func(t *testing.T) {
 		type ValidEntity struct {

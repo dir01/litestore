@@ -15,7 +15,7 @@ func TestGetAndInjectTx(t *testing.T) {
 	defer cleanup()
 
 	// 1. Test GetTx on a context without a transaction
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, ok := litestore.GetTx(ctx)
 	if ok {
 		t.Error("GetTx returned ok=true for a context without a transaction")
@@ -50,7 +50,7 @@ func TestWithTransaction(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	tableName := "test_tx_table"
 
 	// Create the table once for all sub-tests.

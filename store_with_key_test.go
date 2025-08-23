@@ -1,7 +1,6 @@
 package litestore_test
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"reflect"
@@ -14,7 +13,7 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities")
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "test_entities")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -24,14 +23,14 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("save new entity and get it", func(t *testing.T) {
-		entity := &TestPersonWithKey{Name: "first", Category: "A", IsActive: true, Value: 100}
+		entity := &TestPersonWithKey{Name: "first", Key: "notkey", ID: "notkey", Category: "A", IsActive: true, Value: 100}
 
 		// ID should be empty initially
-		if entity.ID != "" {
-			t.Fatalf("expected initial ID to be empty, got %s", entity.ID)
+		if entity.K != "" {
+			t.Fatalf("expected initial ID to be empty, got %s", entity.K)
 		}
 
 		if err := s.Save(ctx, entity); err != nil {
@@ -39,12 +38,12 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 		}
 
 		// ID should be populated now
-		if entity.ID == "" {
+		if entity.K == "" {
 			t.Fatal("expected ID to be populated by Save, but it's empty")
 		}
 
 		// Get it back
-		got, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
+		got, err := s.GetOne(ctx, litestore.Filter{Key: "k", Op: litestore.OpEq, Value: entity.K})
 		if err != nil {
 			t.Fatalf("failed to get entity back: %v", err)
 		}
@@ -56,10 +55,12 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 
 	t.Run("save entity with predefined key", func(t *testing.T) {
 		entity := &TestPersonWithKey{
-			ID:       "predefined-key-123",
-			Name:     "predefined", 
-			Category: "B", 
-			IsActive: false, 
+			K:        "predefined-key-123",
+			Key:      "notkey",
+			ID:       "notkey",
+			Name:     "predefined",
+			Category: "B",
+			IsActive: false,
 			Value:    200,
 		}
 
@@ -68,12 +69,12 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 		}
 
 		// ID should remain unchanged
-		if entity.ID != "predefined-key-123" {
-			t.Errorf("expected ID to remain 'predefined-key-123', got %s", entity.ID)
+		if entity.K != "predefined-key-123" {
+			t.Errorf("expected ID to remain 'predefined-key-123', got %s", entity.K)
 		}
 
 		// Get it back
-		got, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
+		got, err := s.GetOne(ctx, litestore.Filter{Key: "k", Op: litestore.OpEq, Value: entity.K})
 		if err != nil {
 			t.Fatalf("failed to get entity back: %v", err)
 		}
@@ -89,20 +90,20 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 			t.Fatalf("failed to save initial entity: %v", err)
 		}
 
-		originalID := entity.ID
+		originalID := entity.K
 		entity.Name = "updated"
 		entity.Value = 250
-		
+
 		if err := s.Save(ctx, entity); err != nil {
 			t.Fatalf("failed to update entity: %v", err)
 		}
 
 		// ID should remain the same
-		if entity.ID != originalID {
-			t.Errorf("expected ID to remain %s, got %s", originalID, entity.ID)
+		if entity.K != originalID {
+			t.Errorf("expected ID to remain %s, got %s", originalID, entity.K)
 		}
 
-		got, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
+		got, err := s.GetOne(ctx, litestore.Filter{Key: "k", Op: litestore.OpEq, Value: entity.K})
 		if err != nil {
 			t.Fatalf("failed to get updated entity: %v", err)
 		}
@@ -118,11 +119,11 @@ func TestStore_WithKey_Save_GetOne_Delete(t *testing.T) {
 			t.Fatalf("failed to save entity for deletion: %v", err)
 		}
 
-		if err := s.Delete(ctx, entity.ID); err != nil {
+		if err := s.Delete(ctx, entity.K); err != nil {
 			t.Fatalf("failed to delete entity: %v", err)
 		}
 
-		_, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
+		_, err := s.GetOne(ctx, litestore.Filter{Key: "k", Op: litestore.OpEq, Value: entity.K})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected sql.ErrNoRows after deletion, got %v", err)
 		}
@@ -140,7 +141,7 @@ func TestStore_WithKey_GetOne_Errors(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities_getone")
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "test_entities_getone")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestStore_WithKey_GetOne_Errors(t *testing.T) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup data
 	entities := []*TestPersonWithKey{
@@ -181,3 +182,4 @@ func TestStore_WithKey_GetOne_Errors(t *testing.T) {
 		}
 	})
 }
+

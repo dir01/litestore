@@ -266,6 +266,15 @@ func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], err
 				return
 			}
 
+			// If the struct has a key field, populate it with the database key
+			if s.keyField != nil {
+				entityValue := reflect.ValueOf(&t).Elem()
+				keyFieldValue := entityValue.FieldByIndex(s.keyField.Index)
+				if keyFieldValue.CanSet() {
+					keyFieldValue.SetString(key)
+				}
+			}
+
 			if !yield(t, nil) {
 				return
 			}
