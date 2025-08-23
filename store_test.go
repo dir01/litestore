@@ -11,26 +11,11 @@ import (
 	"github.com/dir01/litestore"
 )
 
-// TestEntity has a key field.
-type TestEntity struct {
-	ID       string `litestore:"key"`
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	IsActive bool   `json:"is_active"`
-	Value    int    `json:"value"`
-}
-
-// TestEntityNoKey does not have a key field.
-type TestEntityNoKey struct {
-	Info string `json:"info"`
-	Data int    `json:"data"`
-}
-
 func TestStore_Save_GetOne_Delete(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestEntity](context.Background(), db, "test_entities")
+	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -43,7 +28,7 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("save new entity and get it", func(t *testing.T) {
-		entity := &TestEntity{Name: "first", Category: "A", IsActive: true, Value: 100}
+		entity := &TestPersonWithKey{Name: "first", Category: "A", IsActive: true, Value: 100}
 
 		// ID should be empty initially
 		if entity.ID != "" {
@@ -60,7 +45,7 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 		}
 
 		// Get it back
-		got, err := s.GetOne(ctx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entity.ID})
+		got, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
 		if err != nil {
 			t.Fatalf("failed to get entity back: %v", err)
 		}
@@ -71,7 +56,7 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 	})
 
 	t.Run("update existing entity", func(t *testing.T) {
-		entity := &TestEntity{Name: "update-me", Category: "B", IsActive: false, Value: 200}
+		entity := &TestPersonWithKey{Name: "update-me", Category: "B", IsActive: false, Value: 200}
 		if err := s.Save(ctx, entity); err != nil {
 			t.Fatalf("failed to save initial entity: %v", err)
 		}
@@ -82,7 +67,7 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 			t.Fatalf("failed to update entity: %v", err)
 		}
 
-		got, err := s.GetOne(ctx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entity.ID})
+		got, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
 		if err != nil {
 			t.Fatalf("failed to get updated entity: %v", err)
 		}
@@ -93,7 +78,7 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 	})
 
 	t.Run("delete entity", func(t *testing.T) {
-		entity := &TestEntity{Name: "delete-me", Category: "C", IsActive: true, Value: 300}
+		entity := &TestPersonWithKey{Name: "delete-me", Category: "C", IsActive: true, Value: 300}
 		if err := s.Save(ctx, entity); err != nil {
 			t.Fatalf("failed to save entity for deletion: %v", err)
 		}
@@ -102,7 +87,7 @@ func TestStore_Save_GetOne_Delete(t *testing.T) {
 			t.Fatalf("failed to delete entity: %v", err)
 		}
 
-		_, err := s.GetOne(ctx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entity.ID})
+		_, err := s.GetOne(ctx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entity.ID})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected sql.ErrNoRows after deletion, got %v", err)
 		}
@@ -120,7 +105,7 @@ func TestStore_Save_NoID(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestEntityNoKey](context.Background(), db, "test_entities_no_key")
+	s, err := litestore.NewStore[TestPersonNoKey](context.Background(), db, "test_entities_no_key")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -132,7 +117,7 @@ func TestStore_Save_NoID(t *testing.T) {
 
 	ctx := context.Background()
 
-	entity := &TestEntityNoKey{Info: "some info", Data: 123}
+	entity := &TestPersonNoKey{Info: "some info", Data: 123}
 	if err := s.Save(ctx, entity); err != nil {
 		t.Fatalf("failed to save entity with no key field: %v", err)
 	}
@@ -152,7 +137,7 @@ func TestStore_GetOne_Errors(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestEntity](context.Background(), db, "test_entities_getone")
+	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities_getone")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -165,7 +150,7 @@ func TestStore_GetOne_Errors(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup data
-	entities := []*TestEntity{
+	entities := []*TestPersonWithKey{
 		{Name: "one", Category: "A", Value: 10},
 		{Name: "two", Category: "A", Value: 20},
 	}
@@ -201,7 +186,7 @@ func TestNewStore_Errors(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("invalid table name", func(t *testing.T) {
-		_, err := litestore.NewStore[TestEntity](ctx, db, "invalid-name")
+		_, err := litestore.NewStore[TestPersonWithKey](ctx, db, "invalid-name")
 		if err == nil {
 			t.Fatal("expected an error for invalid table name, got nil")
 		}
@@ -241,7 +226,7 @@ func TestStore_Iter(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	s, err := litestore.NewStore[TestEntity](context.Background(), db, "test_entities_iter")
+	s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "test_entities_iter")
 	if err != nil {
 		t.Fatalf("failed to create new store: %v", err)
 	}
@@ -254,13 +239,13 @@ func TestStore_Iter(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup data
-	entitiesToSave := []*TestEntity{
+	entitiesToSave := []*TestPersonWithKey{
 		{Name: "alice", Category: "A", IsActive: true, Value: 30},
 		{Name: "bob", Category: "A", IsActive: true, Value: 45},
 		{Name: "charlie", Category: "B", IsActive: false, Value: 35},
 		{Name: "david", Category: "B", IsActive: true, Value: 35},
 	}
-	savedEntities := make(map[string]TestEntity)
+	savedEntities := make(map[string]TestPersonWithKey)
 	for _, e := range entitiesToSave {
 		if err := s.Save(ctx, e); err != nil {
 			t.Fatalf("failed to save entity: %v", err)
@@ -268,7 +253,7 @@ func TestStore_Iter(t *testing.T) {
 		savedEntities[e.ID] = *e
 	}
 
-	compareResults := func(t *testing.T, got, want []TestEntity) {
+	compareResults := func(t *testing.T, got, want []TestPersonWithKey) {
 		t.Helper()
 		if len(got) != len(want) {
 			t.Errorf("length mismatch, got %d, want %d", len(got), len(want))
@@ -284,7 +269,7 @@ func TestStore_Iter(t *testing.T) {
 	}
 
 	t.Run("simple AND query", func(t *testing.T) {
-		var results []TestEntity
+		var results []TestPersonWithKey
 		p := litestore.AndPredicates(
 			litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
 			litestore.Filter{Key: "value", Op: litestore.OpGTE, Value: 35},
@@ -301,7 +286,7 @@ func TestStore_Iter(t *testing.T) {
 			results = append(results, entity)
 		}
 
-		var expected []TestEntity
+		var expected []TestPersonWithKey
 		for _, e := range savedEntities {
 			if e.IsActive && e.Value >= 35 {
 				expected = append(expected, e)
@@ -311,7 +296,7 @@ func TestStore_Iter(t *testing.T) {
 	})
 
 	t.Run("composite (A AND B) OR C query", func(t *testing.T) {
-		var results []TestEntity
+		var results []TestPersonWithKey
 		p := litestore.OrPredicates(
 			litestore.AndPredicates(
 				litestore.Filter{Key: "is_active", Op: litestore.OpEq, Value: true},
@@ -331,7 +316,7 @@ func TestStore_Iter(t *testing.T) {
 			results = append(results, entity)
 		}
 
-		var expected []TestEntity
+		var expected []TestPersonWithKey
 		for _, e := range savedEntities {
 			if (e.IsActive && e.Value < 35) || e.Name == "charlie" {
 				expected = append(expected, e)
@@ -341,7 +326,7 @@ func TestStore_Iter(t *testing.T) {
 	})
 
 	t.Run("nil predicate returns all", func(t *testing.T) {
-		var results []TestEntity
+		var results []TestPersonWithKey
 		seq, err := s.Iter(ctx, nil)
 		if err != nil {
 			t.Fatalf("Iter failed: %v", err)
@@ -353,7 +338,7 @@ func TestStore_Iter(t *testing.T) {
 			results = append(results, entity)
 		}
 
-		var expected []TestEntity
+		var expected []TestPersonWithKey
 		for _, e := range savedEntities {
 			expected = append(expected, e)
 		}
@@ -400,7 +385,7 @@ func TestStore_Iter(t *testing.T) {
 	})
 
 	t.Run("query with order and limit", func(t *testing.T) {
-		var results []TestEntity
+		var results []TestPersonWithKey
 		q := &litestore.Query{
 			Predicate: litestore.Filter{Key: "category", Op: litestore.OpEq, Value: "A"}, // alice, bob
 			OrderBy: []litestore.OrderBy{
@@ -427,8 +412,6 @@ func TestStore_Iter(t *testing.T) {
 			t.Errorf("expected bob, got %s", results[0].Name)
 		}
 	})
-
-	
 
 	t.Run("query with order by key", func(t *testing.T) {
 		// get all entities and sort by ID descending

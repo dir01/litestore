@@ -15,7 +15,7 @@ func TestStore_Transactions(t *testing.T) {
 	defer cleanup()
 
 	t.Run("Save on transaction commit", func(t *testing.T) {
-		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_save_commit")
+		s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "tx_save_commit")
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
@@ -25,7 +25,7 @@ func TestStore_Transactions(t *testing.T) {
 			}
 		}()
 
-		entity := &TestEntity{Name: "tx-commit"}
+		entity := &TestPersonWithKey{Name: "tx-commit"}
 		ctxNoTx := context.Background()
 
 		// Start transaction
@@ -42,13 +42,13 @@ func TestStore_Transactions(t *testing.T) {
 		entityID := entity.ID
 
 		// Not visible outside tx
-		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected ErrNoRows outside tx, got %v", err)
 		}
 
 		// Visible inside tx
-		gotInTx, err := s.GetOne(ctxWithTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		gotInTx, err := s.GetOne(ctxWithTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if err != nil {
 			t.Fatalf("expected to get entity inside tx, got err: %v", err)
 		}
@@ -62,7 +62,7 @@ func TestStore_Transactions(t *testing.T) {
 		}
 
 		// Visible outside tx after commit
-		gotAfterTx, err := s.GetOne(ctxNoTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		gotAfterTx, err := s.GetOne(ctxNoTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if err != nil {
 			t.Fatalf("expected to get entity after commit, got err: %v", err)
 		}
@@ -72,7 +72,7 @@ func TestStore_Transactions(t *testing.T) {
 	})
 
 	t.Run("Save on transaction rollback", func(t *testing.T) {
-		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_save_rollback")
+		s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "tx_save_rollback")
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
@@ -82,7 +82,7 @@ func TestStore_Transactions(t *testing.T) {
 			}
 		}()
 
-		entity := &TestEntity{Name: "tx-rollback"}
+		entity := &TestPersonWithKey{Name: "tx-rollback"}
 		ctxNoTx := context.Background()
 
 		// Start transaction
@@ -104,14 +104,14 @@ func TestStore_Transactions(t *testing.T) {
 		}
 
 		// Not visible outside tx after rollback
-		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected ErrNoRows after rollback, got %v", err)
 		}
 	})
 
 	t.Run("Delete on transaction commit", func(t *testing.T) {
-		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_delete_commit")
+		s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "tx_delete_commit")
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
@@ -121,7 +121,7 @@ func TestStore_Transactions(t *testing.T) {
 			}
 		}()
 
-		entity := &TestEntity{Name: "tx-delete-commit"}
+		entity := &TestPersonWithKey{Name: "tx-delete-commit"}
 		ctxNoTx := context.Background()
 		if err := s.Save(ctxNoTx, entity); err != nil {
 			t.Fatalf("failed to save pre-test entity: %v", err)
@@ -141,13 +141,13 @@ func TestStore_Transactions(t *testing.T) {
 		}
 
 		// Visible outside tx (still)
-		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if err != nil {
 			t.Fatalf("expected entity to exist outside tx before commit, got err: %v", err)
 		}
 
 		// Not visible inside tx
-		_, err = s.GetOne(ctxWithTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		_, err = s.GetOne(ctxWithTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected ErrNoRows inside tx after delete, got %v", err)
 		}
@@ -158,14 +158,14 @@ func TestStore_Transactions(t *testing.T) {
 		}
 
 		// Not visible outside tx after commit
-		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected ErrNoRows after commit, got %v", err)
 		}
 	})
 
 	t.Run("Delete on transaction rollback", func(t *testing.T) {
-		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_delete_rollback")
+		s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "tx_delete_rollback")
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
@@ -175,7 +175,7 @@ func TestStore_Transactions(t *testing.T) {
 			}
 		}()
 
-		entity := &TestEntity{Name: "tx-delete-rollback"}
+		entity := &TestPersonWithKey{Name: "tx-delete-rollback"}
 		ctxNoTx := context.Background()
 		if err := s.Save(ctxNoTx, entity); err != nil {
 			t.Fatalf("failed to save pre-test entity: %v", err)
@@ -200,14 +200,14 @@ func TestStore_Transactions(t *testing.T) {
 		}
 
 		// Still visible outside tx after rollback
-		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "ID", Op: litestore.OpEq, Value: entityID})
+		_, err = s.GetOne(ctxNoTx, litestore.Filter{Key: "id", Op: litestore.OpEq, Value: entityID})
 		if err != nil {
 			t.Fatalf("expected entity to exist after rollback, got err: %v", err)
 		}
 	})
 
 	t.Run("Iter sees transactional state", func(t *testing.T) {
-		s, err := litestore.NewStore[TestEntity](context.Background(), db, "tx_iter_state")
+		s, err := litestore.NewStore[TestPersonWithKey](context.Background(), db, "tx_iter_state")
 		if err != nil {
 			t.Fatalf("failed to create new store: %v", err)
 		}
@@ -218,7 +218,7 @@ func TestStore_Transactions(t *testing.T) {
 		}()
 
 		ctxNoTx := context.Background()
-		e1 := &TestEntity{Name: "iter-tx-1"}
+		e1 := &TestPersonWithKey{Name: "iter-tx-1"}
 		if err := s.Save(ctxNoTx, e1); err != nil {
 			t.Fatalf("failed to save entity: %v", err)
 		}
@@ -235,7 +235,7 @@ func TestStore_Transactions(t *testing.T) {
 		}() // Ensure rollback happens even on test failure
 
 		// Add a new one and delete the old one
-		e2 := &TestEntity{Name: "iter-tx-2"}
+		e2 := &TestPersonWithKey{Name: "iter-tx-2"}
 		if err := s.Save(ctxWithTx, e2); err != nil {
 			t.Fatalf("failed to save entity in tx: %v", err)
 		}
@@ -248,7 +248,7 @@ func TestStore_Transactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Iter failed: %v", err)
 		}
-		var results []TestEntity
+		var results []TestPersonWithKey
 		for entity, err := range seq {
 			if err != nil {
 				t.Fatalf("iteration failed: %v", err)
