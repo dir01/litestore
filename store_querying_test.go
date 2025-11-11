@@ -370,4 +370,3 @@ func TestStore_Querying_FilterOperators(t *testing.T) {
 		})
 	}
 }
-

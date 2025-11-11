@@ -50,6 +50,8 @@ func Example() {
 
 	// Create a store for User entities.
 	// The table "users" will be created if it doesn't exist.
+	// For better performance on email lookups, you could add an index:
+	// userStore, err := litestore.NewStore[User](ctx, db, "users", litestore.WithIndex("email"))
 	userStore, err := litestore.NewStore[User](ctx, db, "users")
 	if err != nil {
 		log.Fatalf("failed to create user store: %v", err)

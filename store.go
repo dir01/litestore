@@ -35,11 +35,39 @@ type Store[T any] struct {
 	deleteStmt *sql.Stmt
 }
 
+// StoreOption defines a configuration option for Store creation.
+type StoreOption func(*storeConfig)
+
+// storeConfig holds configuration options for Store creation.
+type storeConfig struct {
+	indexFields []string
+}
+
+// WithIndex adds a JSON field to be indexed for improved query performance.
+// Multiple WithIndex options can be specified to index multiple fields.
+func WithIndex(fieldName string) StoreOption {
+	return func(config *storeConfig) {
+		config.indexFields = append(config.indexFields, fieldName)
+	}
+}
+
 // NewStore creates a new Store instance for a given table name.
 // The generic type `T` must be a struct. If it contains a string field
 // with the struct tag `litestore:"key"`, this field will be used as the
 // primary key. If the tag is omitted, key will be generated automatically on Save.
-func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[T], error) {
+//
+// Options can be provided to configure the store:
+//   - WithIndex("fieldName"): Create an index on the specified JSON field
+func NewStore[T any](ctx context.Context, db *sql.DB, tableName string, options ...StoreOption) (*Store[T], error) {
+	config := &storeConfig{}
+	for _, option := range options {
+		option(config)
+	}
+
+	return newStore[T](ctx, db, tableName, config.indexFields)
+}
+
+func newStore[T any](ctx context.Context, db *sql.DB, tableName string, indexFields []string) (*Store[T], error) {
 	if !validTableNameRe.MatchString(tableName) {
 		return nil, fmt.Errorf("invalid table name: %s", tableName)
 	}
@@ -84,6 +112,9 @@ func NewStore[T any](ctx context.Context, db *sql.DB, tableName string) (*Store[
 
 	if err := store.init(ctx); err != nil {
 		return nil, err
+	}
+	if err := store.createIndexes(ctx, indexFields); err != nil {
+		return nil, fmt.Errorf("creating indexes for %s: %w", tableName, err)
 	}
 	if err := store.prepareStatements(ctx); err != nil {
 		_ = store.Close()
@@ -297,6 +328,49 @@ func (s *Store[T]) init(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, query); err != nil {
 		return fmt.Errorf("creating table %s: %w", s.tableName, err)
 	}
+	return nil
+}
+
+func (s *Store[T]) createIndexes(ctx context.Context, indexFields []string) error {
+	if len(indexFields) == 0 {
+		return nil
+	}
+
+	// Validate that all index fields are valid JSON keys for this type
+	for _, field := range indexFields {
+		if field == "key" {
+			// Skip "key" field - it's already indexed as primary key
+			continue
+		}
+
+		// Only validate top-level keys. Nested keys (e.g. 'a.b') are not validated.
+		if !strings.Contains(field, ".") {
+			if _, ok := s.validJSONKeys[field]; !ok {
+				return fmt.Errorf("invalid index field: '%s' is not a valid key for this entity", field)
+			}
+		}
+
+		// Validate field name for SQL safety (similar to query.go validation)
+		if strings.ContainsAny(field, ";)") {
+			return fmt.Errorf("invalid character in index field: %s", field)
+		}
+	}
+
+	// Create indexes for each field
+	for _, field := range indexFields {
+		if field == "key" {
+			continue // Skip "key" field
+		}
+
+		indexName := fmt.Sprintf("idx_%s_%s", s.tableName, field)
+		jsonPath := "$." + field
+		createIndexSQL := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(json_extract(json, '%s'))", indexName, s.tableName, jsonPath)
+
+		if _, err := s.db.ExecContext(ctx, createIndexSQL); err != nil {
+			return fmt.Errorf("creating index %s: %w", indexName, err)
+		}
+	}
+
 	return nil
 }
 
