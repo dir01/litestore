@@ -95,12 +95,14 @@ type Operator string
 
 // Supported query operators.
 const (
-	OpEq  Operator = "="
-	OpNEq Operator = "!="
-	OpGT  Operator = ">"
-	OpGTE Operator = ">="
-	OpLT  Operator = "<"
-	OpLTE Operator = "<="
+	OpEq    Operator = "="
+	OpNEq   Operator = "!="
+	OpGT    Operator = ">"
+	OpGTE   Operator = ">="
+	OpLT    Operator = "<"
+	OpLTE   Operator = "<="
+	OpIn    Operator = "IN"
+	OpNotIn Operator = "NOT IN"
 )
 
 // Filter is a Predicate that represents a single condition (e.g., 'level > 10').
@@ -142,6 +144,56 @@ func OrPredicates(preds ...Predicate) Or {
 func buildWhereClause(p Predicate, validKeys map[string]struct{}) (string, []any, error) {
 	switch v := p.(type) {
 	case Filter:
+		// Handle IN and NOT IN operators
+		if v.Op == OpIn || v.Op == OpNotIn {
+			// Extract values from the slice
+			values, ok := v.Value.([]any)
+			if !ok {
+				return "", nil, fmt.Errorf("%s operator requires a slice value", v.Op)
+			}
+
+			// Handle nil values as an error
+			if values == nil {
+				return "", nil, fmt.Errorf("%s predicate values cannot be nil", v.Op)
+			}
+
+			// Empty values slice returns an impossible condition (no results for IN, all results for NOT IN)
+			if len(values) == 0 {
+				if v.Op == OpIn {
+					return "1 = 0", nil, nil
+				} else {
+					return "1 = 1", nil, nil
+				}
+			}
+
+			// Build placeholders: "?, ?, ?"
+			placeholders := make([]string, len(values))
+			for i := range values {
+				placeholders[i] = "?"
+			}
+			inClause := strings.Join(placeholders, ", ")
+
+			// Special handling for "key" field
+			if v.Key == "key" {
+				sql := fmt.Sprintf("key %s (%s)", v.Op, inClause)
+				return sql, values, nil
+			}
+
+			// Validate top-level keys (skip nested keys)
+			if !strings.Contains(v.Key, ".") {
+				if _, ok := validKeys[v.Key]; !ok {
+					return "", nil, fmt.Errorf("invalid %s key: '%s' is not a valid key for this entity", v.Op, v.Key)
+				}
+			}
+
+			// JSON field extraction with IN clause
+			sql := fmt.Sprintf("json_extract(json, ?) %s (%s)", v.Op, inClause)
+			args := []any{"$." + v.Key}
+			args = append(args, values...)
+			return sql, args, nil
+		}
+
+		// Handle regular comparison operators
 		switch v.Op {
 		case OpEq, OpNEq, OpGT, OpGTE, OpLT, OpLTE:
 			// Valid operator
