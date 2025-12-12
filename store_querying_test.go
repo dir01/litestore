@@ -1,6 +1,7 @@
 package litestore_test
 
 import (
+	"iter"
 	"reflect"
 	"sort"
 	"testing"
@@ -369,4 +370,265 @@ func TestStore_Querying_FilterOperators(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStore_Querying_InPredicate(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "test_in_predicate")
+	if err != nil {
+		t.Fatalf("failed to create new store: %v", err)
+	}
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("failed to close store: %v", err)
+		}
+	}()
+
+	ctx := t.Context()
+
+	// Test data with predefined keys
+	alice := &TestPersonWithKey{K: "alice", Name: "Alice", Category: "A", Value: 10}
+	bob := &TestPersonWithKey{K: "bob", Name: "Bob", Category: "B", Value: 20}
+	charlie := &TestPersonWithKey{K: "charlie", Name: "Charlie", Category: "A", Value: 30}
+	david := &TestPersonWithKey{K: "david", Name: "David", Category: "C", Value: 40}
+	eve := &TestPersonWithKey{K: "eve", Name: "Eve", Category: "B", Value: 50}
+
+	people := []*TestPersonWithKey{alice, bob, charlie, david, eve}
+	for _, person := range people {
+		if err := s.Save(ctx, person); err != nil {
+			t.Fatalf("failed to save entity: %v", err)
+		}
+	}
+
+	collectResults := func(t *testing.T, seq iter.Seq2[TestPersonWithKey, error]) []TestPersonWithKey {
+		t.Helper()
+		var results []TestPersonWithKey
+		for entity, err := range seq {
+			if err != nil {
+				t.Fatalf("iteration failed: %v", err)
+			}
+			results = append(results, entity)
+		}
+		return results
+	}
+
+	t.Run("In with primary key field", func(t *testing.T) {
+		// Select Alice and Charlie
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "key", Op: litestore.OpIn, Value: []any{"alice", "charlie"}},
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+
+		names := []string{results[0].Name, results[1].Name}
+		sort.Strings(names)
+		expectedNames := []string{"Alice", "Charlie"}
+		sort.Strings(expectedNames)
+
+		if !reflect.DeepEqual(names, expectedNames) {
+			t.Errorf("expected names %v, got %v", expectedNames, names)
+		}
+	})
+
+	t.Run("In with JSON field", func(t *testing.T) {
+		// Select categories A and B
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "category", Op: litestore.OpIn, Value: []any{"A", "B"}},
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 4 {
+			t.Fatalf("expected 4 results, got %d", len(results))
+		}
+
+		names := make([]string, len(results))
+		for i, r := range results {
+			names[i] = r.Name
+		}
+		sort.Strings(names)
+		expectedNames := []string{"Alice", "Bob", "Charlie", "Eve"}
+		sort.Strings(expectedNames)
+
+		if !reflect.DeepEqual(names, expectedNames) {
+			t.Errorf("expected names %v, got %v", expectedNames, names)
+		}
+	})
+
+	t.Run("In with single value", func(t *testing.T) {
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "category", Op: litestore.OpIn, Value: []any{"C"}},
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
+
+		if results[0].Name != "David" {
+			t.Errorf("expected David, got %s", results[0].Name)
+		}
+	})
+
+	t.Run("In with empty values returns no results", func(t *testing.T) {
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "category", Op: litestore.OpIn, Value: []any{}},
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 0 {
+			t.Errorf("expected 0 results, got %d", len(results))
+		}
+	})
+
+	t.Run("In with nil values returns error", func(t *testing.T) {
+		_, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "category", Op: litestore.OpIn, Value: nil},
+		})
+		if err == nil {
+			t.Fatal("expected error for nil values, got nil")
+		}
+		if !contains(err.Error(), "requires a slice value") && !contains(err.Error(), "values cannot be nil") {
+			t.Errorf("expected error to contain 'requires a slice value' or 'values cannot be nil', got: %s", err.Error())
+		}
+	})
+
+	t.Run("In with invalid key returns error", func(t *testing.T) {
+		_, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "nonexistent_field", Op: litestore.OpIn, Value: []any{"A", "B"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid key, got nil")
+		}
+		if !contains(err.Error(), "invalid IN key") {
+			t.Errorf("expected error to contain 'invalid IN key', got: %s", err.Error())
+		}
+	})
+
+	t.Run("In combined with And", func(t *testing.T) {
+		// Category in (A, B) AND Value > 25
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.AndPredicates(
+				litestore.Filter{Key: "category", Op: litestore.OpIn, Value: []any{"A", "B"}},
+				litestore.Filter{Key: "value", Op: litestore.OpGT, Value: 25},
+			),
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+
+		names := []string{results[0].Name, results[1].Name}
+		sort.Strings(names)
+		expectedNames := []string{"Charlie", "Eve"}
+		sort.Strings(expectedNames)
+
+		if !reflect.DeepEqual(names, expectedNames) {
+			t.Errorf("expected names %v, got %v", expectedNames, names)
+		}
+	})
+
+	t.Run("In combined with Or", func(t *testing.T) {
+		// Category in (A) OR Value > 40
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.OrPredicates(
+				litestore.Filter{Key: "category", Op: litestore.OpIn, Value: []any{"A"}},
+				litestore.Filter{Key: "value", Op: litestore.OpGT, Value: 40},
+			),
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 3 {
+			t.Fatalf("expected 3 results, got %d", len(results))
+		}
+
+		names := make([]string, len(results))
+		for i, r := range results {
+			names[i] = r.Name
+		}
+		sort.Strings(names)
+		expectedNames := []string{"Alice", "Charlie", "Eve"}
+		sort.Strings(expectedNames)
+
+		if !reflect.DeepEqual(names, expectedNames) {
+			t.Errorf("expected names %v, got %v", expectedNames, names)
+		}
+	})
+
+	t.Run("In with numeric values", func(t *testing.T) {
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "value", Op: litestore.OpIn, Value: []any{10, 30, 50}},
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 3 {
+			t.Fatalf("expected 3 results, got %d", len(results))
+		}
+
+		names := make([]string, len(results))
+		for i, r := range results {
+			names[i] = r.Name
+		}
+		sort.Strings(names)
+		expectedNames := []string{"Alice", "Charlie", "Eve"}
+		sort.Strings(expectedNames)
+
+		if !reflect.DeepEqual(names, expectedNames) {
+			t.Errorf("expected names %v, got %v", expectedNames, names)
+		}
+	})
+
+	t.Run("OpIn with variadic values converted to slice", func(t *testing.T) {
+		// Test using a slice directly
+		seq, err := s.Iter(ctx, &litestore.Query{
+			Predicate: litestore.Filter{Key: "category", Op: litestore.OpIn, Value: []any{"A", "B"}},
+		})
+		if err != nil {
+			t.Fatalf("Iter failed: %v", err)
+		}
+
+		results := collectResults(t, seq)
+		if len(results) != 4 {
+			t.Fatalf("expected 4 results, got %d", len(results))
+		}
+	})
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsSubstring(s, substr))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
