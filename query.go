@@ -23,21 +23,23 @@ const (
 // OrderBy specifies a field to sort the results by.
 type OrderBy struct {
 	// Key is the field name to sort by. It can be a top-level property (e.g., 'name'),
-	// a nested JSON path (e.g., 'user.name'), or the special value 'key' for the primary key.
+	// or a nested JSON path (e.g., 'user.name'). If the entity has a key field,
+	// you can use its JSON field name to sort by the primary key.
 	Key       string
 	Direction OrderDirection
 }
 
 // build constructs the SQL query string and arguments.
 // It assumes q is not nil.
-func (q *Query) build(tableName string, validKeys map[string]struct{}) (string, []any, error) {
+// keyFieldName is the JSON key name for the primary key field (empty string if no key field).
+func (q *Query) build(tableName string, validKeys map[string]struct{}, keyFieldName string) (string, []any, error) {
 	var queryBuilder strings.Builder
 	args := []any{}
 
 	queryBuilder.WriteString(fmt.Sprintf("SELECT key, json FROM %s", tableName))
 
 	if q.Predicate != nil {
-		whereClause, whereArgs, err := buildWhereClause(q.Predicate, validKeys)
+		whereClause, whereArgs, err := buildWhereClause(q.Predicate, validKeys, keyFieldName)
 		if err != nil {
 			return "", nil, err
 		}
@@ -54,9 +56,9 @@ func (q *Query) build(tableName string, validKeys map[string]struct{}) (string, 
 			if o.Direction != OrderAsc && o.Direction != OrderDesc {
 				return "", nil, fmt.Errorf("invalid order direction: %s", o.Direction)
 			}
-			// We can't use a parameter for the column name in ORDER BY.
-			// The key column is safe. JSON paths are also safe when used with json_extract.
-			if o.Key == "key" {
+			// Check if this is ordering by the primary key field
+			if keyFieldName != "" && o.Key == keyFieldName {
+				// Use the key column directly for better performance
 				orderClauses = append(orderClauses, fmt.Sprintf("key %s", o.Direction))
 			} else {
 				if strings.ContainsAny(o.Key, ";)") {
@@ -95,12 +97,14 @@ type Operator string
 
 // Supported query operators.
 const (
-	OpEq  Operator = "="
-	OpNEq Operator = "!="
-	OpGT  Operator = ">"
-	OpGTE Operator = ">="
-	OpLT  Operator = "<"
-	OpLTE Operator = "<="
+	OpEq    Operator = "="
+	OpNEq   Operator = "!="
+	OpGT    Operator = ">"
+	OpGTE   Operator = ">="
+	OpLT    Operator = "<"
+	OpLTE   Operator = "<="
+	OpIn    Operator = "IN"
+	OpNotIn Operator = "NOT IN"
 )
 
 // Filter is a Predicate that represents a single condition (e.g., 'level > 10').
@@ -139,9 +143,59 @@ func OrPredicates(preds ...Predicate) Or {
 }
 
 // buildWhereClause recursively walks the predicate tree to build the SQL query.
-func buildWhereClause(p Predicate, validKeys map[string]struct{}) (string, []any, error) {
+func buildWhereClause(p Predicate, validKeys map[string]struct{}, keyFieldName string) (string, []any, error) {
 	switch v := p.(type) {
 	case Filter:
+		// Handle IN and NOT IN operators
+		if v.Op == OpIn || v.Op == OpNotIn {
+			// Extract values from the slice
+			values, ok := v.Value.([]any)
+			if !ok {
+				return "", nil, fmt.Errorf("%s operator requires a slice value", v.Op)
+			}
+
+			// Handle nil values as an error
+			if values == nil {
+				return "", nil, fmt.Errorf("%s predicate values cannot be nil", v.Op)
+			}
+
+			// Empty values slice returns an impossible condition (no results for IN, all results for NOT IN)
+			if len(values) == 0 {
+				if v.Op == OpIn {
+					return "1 = 0", nil, nil
+				} else {
+					return "1 = 1", nil, nil
+				}
+			}
+
+			// Build placeholders: "?, ?, ?"
+			placeholders := make([]string, len(values))
+			for i := range values {
+				placeholders[i] = "?"
+			}
+			inClause := strings.Join(placeholders, ", ")
+
+			// Check if this is a query on the primary key field
+			if keyFieldName != "" && v.Key == keyFieldName {
+				sql := fmt.Sprintf("key %s (%s)", v.Op, inClause)
+				return sql, values, nil
+			}
+
+			// Validate top-level keys (skip nested keys)
+			if !strings.Contains(v.Key, ".") {
+				if _, ok := validKeys[v.Key]; !ok {
+					return "", nil, fmt.Errorf("invalid %s key: '%s' is not a valid key for this entity", v.Op, v.Key)
+				}
+			}
+
+			// JSON field extraction with IN clause
+			sql := fmt.Sprintf("json_extract(json, ?) %s (%s)", v.Op, inClause)
+			args := []any{"$." + v.Key}
+			args = append(args, values...)
+			return sql, args, nil
+		}
+
+		// Handle regular comparison operators
 		switch v.Op {
 		case OpEq, OpNEq, OpGT, OpGTE, OpLT, OpLTE:
 			// Valid operator
@@ -149,7 +203,8 @@ func buildWhereClause(p Predicate, validKeys map[string]struct{}) (string, []any
 			return "", nil, fmt.Errorf("unsupported query operator: %s", v.Op)
 		}
 
-		if v.Key == "key" {
+		// Check if this is a query on the primary key field
+		if keyFieldName != "" && v.Key == keyFieldName {
 			sql := fmt.Sprintf("key %s ?", v.Op)
 			return sql, []any{v.Value}, nil
 		}
@@ -166,17 +221,17 @@ func buildWhereClause(p Predicate, validKeys map[string]struct{}) (string, []any
 		return sql, args, nil
 
 	case And:
-		return joinPredicates(v.Predicates, "AND", validKeys)
+		return joinPredicates(v.Predicates, "AND", validKeys, keyFieldName)
 
 	case Or:
-		return joinPredicates(v.Predicates, "OR", validKeys)
+		return joinPredicates(v.Predicates, "OR", validKeys, keyFieldName)
 
 	default:
 		return "", nil, fmt.Errorf("unknown predicate type: %T", p)
 	}
 }
 
-func joinPredicates(preds []Predicate, joiner string, validKeys map[string]struct{}) (string, []any, error) {
+func joinPredicates(preds []Predicate, joiner string, validKeys map[string]struct{}, keyFieldName string) (string, []any, error) {
 	if len(preds) == 0 {
 		return "", nil, nil
 	}
@@ -185,7 +240,7 @@ func joinPredicates(preds []Predicate, joiner string, validKeys map[string]struc
 	var allArgs []any
 
 	for _, pred := range preds {
-		clause, args, err := buildWhereClause(pred, validKeys)
+		clause, args, err := buildWhereClause(pred, validKeys, keyFieldName)
 		if err != nil {
 			return "", nil, err
 		}

@@ -199,7 +199,7 @@ func TestStore_Querying_Iter(t *testing.T) {
 
 		q := &litestore.Query{
 			OrderBy: []litestore.OrderBy{
-				{Key: "key", Direction: litestore.OrderDesc},
+				{Key: "k", Direction: litestore.OrderDesc},
 			},
 		}
 		seq, err := s.Iter(ctx, q)

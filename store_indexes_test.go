@@ -123,9 +123,9 @@ func TestIndexCreationWithKeyField(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create store with "key" field in index list (should be ignored)
+	// Create store with key field in index list (should be ignored)
 	store, err := litestore.NewStore[IndexedEntity](ctx, db, "with_key_field",
-		litestore.WithIndex("key"),
+		litestore.WithIndex("ID"),
 		litestore.WithIndex("email"))
 	if err != nil {
 		t.Fatalf("failed to create store with key field: %v", err)

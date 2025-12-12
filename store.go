@@ -27,6 +27,10 @@ type Store[T any] struct {
 	// It is nil if no such field is present.
 	keyField *reflect.StructField
 
+	// keyFieldJSONName holds the JSON key name for the key field.
+	// Empty string if no key field is present.
+	keyFieldJSONName string
+
 	// validJSONKeys holds the set of JSON keys for type T.
 	validJSONKeys map[string]struct{}
 
@@ -79,10 +83,21 @@ func newStore[T any](ctx context.Context, db *sql.DB, tableName string, indexFie
 	}
 
 	var keyField *reflect.StructField
+	var keyFieldJSONName string
 	validJSONKeys := make(map[string]struct{})
 
 	for i := range typ.NumField() {
 		field := typ.Field(i)
+
+		jsonTag := field.Tag.Get("json")
+		jsonName := ""
+		if jsonTag != "-" {
+			jsonName, _, _ = strings.Cut(jsonTag, ",")
+			if jsonName == "" {
+				jsonName = field.Name
+			}
+			validJSONKeys[jsonName] = struct{}{}
+		}
 
 		if tag := field.Tag.Get("litestore"); tag == "key" {
 			if field.Type.Kind() != reflect.String {
@@ -90,24 +105,16 @@ func newStore[T any](ctx context.Context, db *sql.DB, tableName string, indexFie
 			}
 			f := field
 			keyField = &f
+			keyFieldJSONName = jsonName
 		}
-
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "-" {
-			continue
-		}
-		jsonName, _, _ := strings.Cut(jsonTag, ",")
-		if jsonName == "" {
-			jsonName = field.Name
-		}
-		validJSONKeys[jsonName] = struct{}{}
 	}
 
 	store := &Store[T]{
-		db:            db,
-		tableName:     tableName,
-		keyField:      keyField,
-		validJSONKeys: validJSONKeys,
+		db:               db,
+		tableName:        tableName,
+		keyField:         keyField,
+		keyFieldJSONName: keyFieldJSONName,
+		validJSONKeys:    validJSONKeys,
 	}
 
 	if err := store.init(ctx); err != nil {
@@ -256,7 +263,7 @@ func (s *Store[T]) Iter(ctx context.Context, q *Query) (iter.Seq2[T, error], err
 		q = &Query{}
 	}
 
-	querySQL, args, err := q.build(s.tableName, s.validJSONKeys)
+	querySQL, args, err := q.build(s.tableName, s.validJSONKeys, s.keyFieldJSONName)
 	if err != nil {
 		return nil, fmt.Errorf("building query: %w", err)
 	}
@@ -338,8 +345,8 @@ func (s *Store[T]) createIndexes(ctx context.Context, indexFields []string) erro
 
 	// Validate that all index fields are valid JSON keys for this type
 	for _, field := range indexFields {
-		if field == "key" {
-			// Skip "key" field - it's already indexed as primary key
+		if s.keyFieldJSONName != "" && field == s.keyFieldJSONName {
+			// Skip key field - it's already indexed as primary key
 			continue
 		}
 
@@ -358,8 +365,8 @@ func (s *Store[T]) createIndexes(ctx context.Context, indexFields []string) erro
 
 	// Create indexes for each field
 	for _, field := range indexFields {
-		if field == "key" {
-			continue // Skip "key" field
+		if s.keyFieldJSONName != "" && field == s.keyFieldJSONName {
+			continue // Skip key field - it's already indexed as primary key
 		}
 
 		indexName := fmt.Sprintf("idx_%s_%s", s.tableName, field)
