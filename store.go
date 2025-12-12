@@ -156,9 +156,14 @@ func (s *Store[T]) Close() error {
 // Save call, effectively always inserting a new record. The generated ID is not
 // set on the struct.
 func (s *Store[T]) Save(ctx context.Context, entity *T) error {
+	if entity == nil {
+		return fmt.Errorf("cannot save a nil value")
+	}
+
 	stmt := s.saveStmt
 	if tx, ok := GetTx(ctx); ok {
 		stmt = tx.StmtContext(ctx, stmt)
+		defer stmt.Close()
 	}
 
 	var key string
@@ -199,6 +204,7 @@ func (s *Store[T]) Delete(ctx context.Context, key string) error {
 	stmt := s.deleteStmt
 	if tx, ok := GetTx(ctx); ok {
 		stmt = tx.StmtContext(ctx, stmt)
+		defer stmt.Close()
 	}
 
 	_, err := stmt.ExecContext(ctx, key)

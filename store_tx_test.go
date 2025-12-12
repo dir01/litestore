@@ -3,6 +3,7 @@ package litestore_test
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -262,4 +263,75 @@ func TestStore_Transactions(t *testing.T) {
 			t.Fatalf("expected to find e2 in tx, but got ID %s", results[0].K)
 		}
 	})
+}
+
+func TestStore_TransactionStatementLeak(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	s, err := litestore.NewStore[TestPersonWithKey](t.Context(), db, "tx_stmt_leak")
+	if err != nil {
+		t.Fatalf("failed to create new store: %v", err)
+	}
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("failed to close store: %v", err)
+		}
+	}()
+
+	ctx := t.Context()
+
+	// NOTE: This test demonstrates the statement leak issue.
+	// While SQLite may not always fail with "statement not closed" errors,
+	// the leak is real and violates database/sql contract.
+	//
+	// Without defer stmt.Close() in Save/Delete methods:
+	// - Each Save() and Delete() call creates a new tx-scoped statement
+	// - These statements are never closed
+	// - Resources accumulate in the transaction
+	// - This can cause issues with other databases or under heavy load
+
+	// Start transaction
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to start transaction: %v", err)
+	}
+	txCtx := litestore.InjectTx(ctx, tx)
+
+	// Perform multiple operations to create multiple tx-scoped statements
+	// This creates 100 Save + 99 Delete = 199 tx-scoped statements
+	var savedKeys []string
+	for i := 0; i < 100; i++ {
+		entity := &TestPersonWithKey{
+			Name:     fmt.Sprintf("person-%d", i),
+			Category: "test",
+			Value:    i,
+		}
+		if err := s.Save(txCtx, entity); err != nil {
+			tx.Rollback()
+			t.Fatalf("failed to save entity %d: %v", i, err)
+		}
+		savedKeys = append(savedKeys, entity.K)
+
+		// Also test Delete to create more tx-scoped statements
+		if i > 0 {
+			// Delete the previous entity
+			if err := s.Delete(txCtx, savedKeys[i-1]); err != nil {
+				tx.Rollback()
+				t.Fatalf("failed to delete entity %d: %v", i-1, err)
+			}
+		}
+	}
+
+	// This commit should succeed if statements are properly closed
+	// Without the fix, we're leaking ~199 statements
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("failed to commit transaction (possible statement leak): %v", err)
+	}
+
+	// The test passes with SQLite even with the leak, but:
+	// 1. The leak violates database/sql contract (tx.StmtContext must be closed)
+	// 2. Other databases may fail more explicitly
+	// 3. Resource accumulation is bad practice
+	t.Logf("Transaction committed successfully (created ~199 tx-scoped statements)")
 }
