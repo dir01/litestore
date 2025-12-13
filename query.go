@@ -2,6 +2,7 @@ package litestore
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -148,15 +149,25 @@ func buildWhereClause(p Predicate, validKeys map[string]struct{}, keyFieldName s
 	case Filter:
 		// Handle IN and NOT IN operators
 		if v.Op == OpIn || v.Op == OpNotIn {
-			// Extract values from the slice
-			values, ok := v.Value.([]any)
-			if !ok {
+			// Extract values from any slice type using reflection
+			var values []any
+
+			// Check if v.Value is a slice or array using reflection
+			rv := reflect.ValueOf(v.Value)
+			if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
 				return "", nil, fmt.Errorf("%s operator requires a slice value", v.Op)
 			}
 
-			// Handle nil values as an error
-			if values == nil {
+			// Handle nil slices as an error
+			if rv.Kind() == reflect.Slice && rv.IsNil() {
 				return "", nil, fmt.Errorf("%s predicate values cannot be nil", v.Op)
+			}
+
+			// Convert slice elements to []any
+			sliceLen := rv.Len()
+			values = make([]any, sliceLen)
+			for i := 0; i < sliceLen; i++ {
+				values[i] = rv.Index(i).Interface()
 			}
 
 			// Empty values slice returns an impossible condition (no results for IN, all results for NOT IN)
